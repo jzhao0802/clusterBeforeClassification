@@ -74,11 +74,11 @@ def main():
     
     pos_col = pos.columns
     #include variable list
-    common_list = ['matched_positive_id', 'label', 'patid']
+    # common_list = ['matched_positive_id', 'label', 'patid']
     exc_var_list = exc_list("/home/lichao.wang/data/BI/", "vars_to_exclude_list1.csv")
     #orla would like to remove "LVL3_GASTROSC_AVG_RXDX" as well on 0824
     inc_vars = [x for x in pos_col if x not in
-               exc_var_list+common_list+['LVL3_GASTROSC_AVG_RXDX']]
+               exc_var_list+['LVL3_GASTROSC_AVG_RXDX']]
                
     pos.select(inc_vars).write.csv(result_dir_s3+"pos.csv", header="true")
     neg.select(inc_vars).write.csv(result_dir_s3+"neg.csv", header="true")
