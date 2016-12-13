@@ -4,12 +4,12 @@ from pyspark.sql.functions import udf
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
-from imspaeva import BinaryClassificationEvaluatorWithPrecisionAtRecall
 import numpy
 import os
 import time
 import datetime
 from imspacv import CrossValidatorWithStratificationID
+from imspaeva import BinaryClassificationEvaluatorWithPrecisionAtRecall
 
 # get the predicted probability in Vector
 def getitem(i):
@@ -17,6 +17,12 @@ def getitem(i):
         return v.array.item(i)
     return udf(getitem_, DoubleType())
 
+def save_analysis_info(path, file_name, **kwargs):
+    for key, value in kwargs.iteritems(): 
+        with open(path + file_name, "w") as file:
+            file.write(key + ": " + str(value) + "\n")
+        os.chmod(path + file_name, 0o777)
+    
 def main():
     # user to specify: hyper-params
     n_eval_folds = 5
@@ -31,12 +37,16 @@ def main():
     
     
     # user to specify : seed in Random Forest model
-    iseed = 42
+    seed = 42
     # user to specify: input data location
-    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/clean_data/"
-    pos_file = "pos.csv"
-    neg_file ="neg.csv"
-    ss_file = "ss.csv"
+    # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/clean_data/"
+    # pos_file = "pos.csv"
+    # neg_file ="neg.csv"
+    # ss_file = "ss.csv"
+    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    pos_file = "pos_50.csv"
+    neg_file ="neg_50.csv"
+    ss_file = "ss_50.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(__file__).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
@@ -66,12 +76,31 @@ def main():
     # user to specify: the output location on s3
     start_time = time.time()
     st = datetime.datetime.fromtimestamp(start_time).strftime('%Y%m%d_%H%M%S')
-    resultDir_s3 = "s3://emr-rwes-pa-spark-dev-datastore/Hui/template_test/results/" + st + "/"
+    result_dir_s3 = "s3://emr-rwes-pa-spark-dev-datastore/Hui/template_test/results/" + st + "/"
     # user to specify the output location on master
-    resultDir_master = "/home/lichao.wang/code/lichao/test/Results/" + st + "/"
+    result_dir_master = "/home/lichao.wang/code/lichao/test/Results/" + st + "/"
+    if not os.path.exists(result_dir_s3):
+        os.makedirs(result_dir_s3, 0o777)
+    if not os.path.exists(result_dir_master):
+        os.makedirs(result_dir_master, 0o777)
 
     
-    
+    save_analysis_info(\
+        result_dir_master, 
+        "analysis_info.txt", 
+        n_eval_folds=n_eval_folds,
+        n_cv_folds = 5,
+        grid_n_trees = [20, 30],
+        grid_depth = [3, 4],
+        desired_recalls = [0.05,0.10],
+        seed=seed,
+        data_path=data_path,
+        pos_file=pos_file,
+        neg_file=neg_file,
+        ss_file=ss_file,
+        result_dir_s3=result_dir_s3,
+        result_dir_master=result_dir_master
+        )
     
     
 
@@ -97,8 +126,7 @@ def main():
     
     # the model (pipeline)
     rf = RandomForestClassifier(featuresCol = collectivePredictorCol,
-                                labelCol = orgOutputCol, seed=iseed)
-    Need to update the evaluator 
+                                labelCol = orgOutputCol, seed=seed)
     evaluator = BinaryClassificationEvaluatorWithPrecisionAtRecall(\
         rawPredictionCol=predictionCol,
         labelCol=orgOutputCol,
@@ -112,12 +140,6 @@ def main():
 
     # cross-evaluation
     predictionsAllData = None
-
-    if not os.path.exists(resultDir_s3):
-        os.makedirs(resultDir_s3, 0o777)
-    if not os.path.exists(resultDir_master):
-        os.makedirs(resultDir_master, 0o777)
-    os.chmod(resultDir_master, 0o777)
 
     for iFold in range(n_eval_folds):
         
@@ -151,25 +173,25 @@ def main():
 
         # save the metrics for all hyper-parameter sets in cv
         cvMetrics = cvModel.avgMetrics
-        cvMetricsFileName = resultDir_s3 + "cvMetricsFold" + str(iFold)
+        cvMetricsFileName = result_dir_s3 + "cvMetricsFold" + str(iFold)
         cvMetrics.coalesce(4).write.csv(cvMetricsFileName, header="true")
 
         # save the hyper-parameters of the best model
         bestParams = validator.getBestModelParams()
-        with open(resultDir_master + "bestParamsFold" + str(iFold) + ".txt",
+        with open(result_dir_master + "bestParamsFold" + str(iFold) + ".txt",
                   "w") as fileBestParams:
             fileBestParams.write(str(bestParams))
-        os.chmod(resultDir_master + "bestParamsFold" + str(iFold) + ".txt", 0o777)
+        os.chmod(result_dir_master + "bestParamsFold" + str(iFold) + ".txt", 0o777)
         # save importance score of the best model
-        with open(resultDir_master + "importanceScoreFold" + str(iFold) + ".txt",
+        with open(result_dir_master + "importanceScoreFold" + str(iFold) + ".txt",
                   "w") as filecvCoef:
             for id in range(len(orgPredictorCols)):
                 filecvCoef.write("{0} : {1}".format(orgPredictorCols[id], cvModel.bestModel.featureImportances[id]))
                 filecvCoef.write("\n")
-        os.chmod(resultDir_master + "importanceScoreFold" + str(iFold) + ".txt", 0o777)
+        os.chmod(result_dir_master + "importanceScoreFold" + str(iFold) + ".txt", 0o777)
 
     # save all predictions
-    predictionsFileName = resultDir_s3 + "predictionsAllData"
+    predictionsFileName = result_dir_s3 + "predictionsAllData"
     predictionsAllData.select(orgOutputCol,
                               getitem(1)(predictionCol).alias('prob_1'))\
         .write.csv(predictionsFileName, header="true")
@@ -177,7 +199,7 @@ def main():
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
     metricValues = evaluator\
         .evaluateWithSeveralMetrics(dataset, metricSets = metricSets)\
-        .write.csv(resultDir_s3+"metricValuesEntireData.csv", header="true")
+        .write.csv(result_dir_s3+"metricValuesEntireData.csv", header="true")
     spark.stop()
 
 if __name__ == "__main__":
