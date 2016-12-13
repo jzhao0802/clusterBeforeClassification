@@ -8,6 +8,7 @@ import numpy
 import os
 import time
 import datetime
+from stratification import AppendDataMatchingFoldIDs
 from imspacv import CrossValidatorWithStratificationID
 from imspaeva import BinaryClassificationEvaluatorWithPrecisionAtRecall
 
@@ -18,18 +19,18 @@ def getitem(i):
     return udf(getitem_, DoubleType())
 
 def save_analysis_info(path, file_name, **kwargs):
-    for key, value in kwargs.iteritems(): 
-        with open(path + file_name, "w") as file:
+    with open(path + file_name, "w") as file:
+        for key, value in kwargs.iteritems():         
             file.write(key + ": " + str(value) + "\n")
         os.chmod(path + file_name, 0o777)
     
 def main():
     # user to specify: hyper-params
-    n_eval_folds = 5
-    n_cv_folds = 5    
+    n_eval_folds = 3
+    n_cv_folds = 3    
     
     grid_n_trees = [20, 30]
-    grid_depth = [3, 4]
+    grid_depth = [3]
         
     # desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
     desired_recalls = [0.05,0.10]
@@ -45,7 +46,7 @@ def main():
     # ss_file = "ss.csv"
     data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
     pos_file = "pos_50.csv"
-    neg_file ="neg_50.csv"
+    neg_file = "neg_50.csv"
     ss_file = "ss_50.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(__file__).getOrCreate()
@@ -64,11 +65,17 @@ def main():
     orgOutputCol = "label"
     matchCol = "matched_positive_id"
     nonFeatureCols = ["matched_positive_id", "label", "patid"]
-    orgPredictorCols = [x for x in data.columns if x not in nonFeatureCols]
     # sanity check 
-    if type(data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
+    if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
-    data = data.withColumn(orgOutputCol, data[orgOutputCol].cast("double"))
+    org_pos_data = org_pos_data.withColumn(orgOutputCol, org_pos_data[orgOutputCol].cast("double"))
+    orgPredictorCols = [x for x in org_pos_data.columns if x not in nonFeatureCols]    
+    if type(org_neg_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
+        raise TypeError("The output column is not of type integer or double. ")
+    org_neg_data = org_neg_data.withColumn(orgOutputCol, org_neg_data[orgOutputCol].cast("double"))
+    if type(org_ss_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
+        raise TypeError("The output column is not of type integer or double. ")
+    org_ss_data = org_ss_data.withColumn(orgOutputCol, org_ss_data[orgOutputCol].cast("double"))
     # user to specify: the collective column name for all predictors
     collectivePredictorCol = "features"
     # user to specify: the column name for prediction
@@ -76,7 +83,7 @@ def main():
     # user to specify: the output location on s3
     start_time = time.time()
     st = datetime.datetime.fromtimestamp(start_time).strftime('%Y%m%d_%H%M%S')
-    result_dir_s3 = "s3://emr-rwes-pa-spark-dev-datastore/Hui/template_test/results/" + st + "/"
+    result_dir_s3 = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/Results/" + st + "/"
     # user to specify the output location on master
     result_dir_master = "/home/lichao.wang/code/lichao/test/Results/" + st + "/"
     if not os.path.exists(result_dir_s3):
@@ -89,10 +96,10 @@ def main():
         result_dir_master, 
         "analysis_info.txt", 
         n_eval_folds=n_eval_folds,
-        n_cv_folds = 5,
-        grid_n_trees = [20, 30],
-        grid_depth = [3, 4],
-        desired_recalls = [0.05,0.10],
+        n_cv_folds=n_cv_folds,
+        grid_n_trees=grid_n_trees,
+        grid_depth=grid_depth,
+        desired_recalls=desired_recalls,
         seed=seed,
         data_path=data_path,
         pos_file=pos_file,
@@ -107,10 +114,10 @@ def main():
     # convert to ml-compatible format
     assembler = VectorAssembler(inputCols=orgPredictorCols, outputCol=collectivePredictorCol)
     posFeatureAssembledData = assembler.transform(org_pos_data)\
-        .select(nonFeatureCols, collectivePredictorCol)
+        .select(nonFeatureCols + [collectivePredictorCol])
     posFeatureAssembledData.cache()
     negFeatureAssembledData = assembler.transform(org_neg_data)\
-        .select(nonFeatureCols, collectivePredictorCol)
+        .select(nonFeatureCols + [collectivePredictorCol])
     negFeatureAssembledData.cache()
     #
     evalIDCol = "evalFoldID"
@@ -120,7 +127,7 @@ def main():
     
     
     ssFeatureAssembledData = assembler.transform(org_ss_data)\
-        .select(nonFeatureCols, collectivePredictorCol)
+        .select(nonFeatureCols + [collectivePredictorCol])
     ssFeatureAssembledData.cache()
     
     
@@ -144,9 +151,9 @@ def main():
     for iFold in range(n_eval_folds):
         
         
-        condition = featureAssembledData[outerFoldCol] == iFold
-        leftoutFold = featureAssembledData.filter(condition)
-        trainFolds = featureAssembledData.filter(~condition).drop(evalIDCol)
+        condition = pos_neg_data_with_eval_ids[evalIDCol] == iFold
+        leftoutFold = pos_neg_data_with_eval_ids.filter(condition)
+        trainFolds = pos_neg_data_with_eval_ids.filter(~condition).drop(evalIDCol)
         trainDataWithCVFoldID = AppendDataMatchingFoldIDs(trainFolds, n_cv_folds, matchCol, foldCol=cvIDCol)
 
         validator = CrossValidatorWithStratificationID(\
@@ -161,8 +168,8 @@ def main():
         #
         ## test data
         testData = ssFeatureAssembledData\
-            .join(leftoutFold, matchCol, how="left_outer")\
-            .union(leftoutFold.drop("evalIDCol"))
+            .join(leftoutFold.select(matchCol), matchCol)\
+            .union(leftoutFold.drop(evalIDCol))
         
         predictions = cvModel.transform(testData)
 
@@ -198,8 +205,13 @@ def main():
     # metrics of predictions on the entire dataset
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
     metricValues = evaluator\
-        .evaluateWithSeveralMetrics(dataset, metricSets = metricSets)\
-        .write.csv(result_dir_s3+"metricValuesEntireData.csv", header="true")
+        .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+    with open(result_dir_master + "metricValuesEntireData.csv", "w") as file:
+        for elem in metricValues:
+            key = elem.keys()[0]
+            value = elem.values()[0]
+            file.write(key + "," + str(value) + "\n")
+    os.chmod(result_dir_master + "metricValuesEntireData.csv", 0o777)
     spark.stop()
 
 if __name__ == "__main__":
