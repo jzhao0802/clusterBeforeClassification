@@ -26,28 +26,28 @@ def save_analysis_info(path, file_name, **kwargs):
     
 def main():
     # user to specify: hyper-params
-    n_eval_folds = 3
-    n_cv_folds = 3    
+    n_eval_folds = 5
+    n_cv_folds = 5  
     
-    grid_n_trees = [20, 30]
-    grid_depth = [3]
+    grid_n_trees = [200, 300]
+    grid_depth = [5,20]
         
     # desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-    desired_recalls = [0.05,0.10]
+    desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
     
     
     
     # user to specify : seed in Random Forest model
     seed = 42
     # user to specify: input data location
-    # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/clean_data/"
-    # pos_file = "pos.csv"
-    # neg_file ="neg.csv"
-    # ss_file = "ss.csv"
-    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    pos_file = "pos_50.csv"
-    neg_file = "neg_50.csv"
-    ss_file = "ss_50.csv"
+    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/clean_data/"
+    pos_file = "pos.csv"
+    neg_file = "neg.csv"
+    ss_file = "ss.csv"
+    # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    # pos_file = "pos_50.csv"
+    # neg_file = "neg_50.csv"
+    # ss_file = "ss_50.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(__file__).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
