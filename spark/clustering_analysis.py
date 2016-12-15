@@ -45,8 +45,8 @@ def main():
     # user to specify: input data location
     data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
     pos_file = "pos_70.0pct.csv"
-    neg_file = "pos_70.0pct.csv"
-    ss_file = "pos_70.0pct.csv"
+    neg_file = "neg_70.0pct.csv"
+    ss_file = "ss_70.0pct.csv"
     # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
     # pos_file = "pos_50.csv"
     # neg_file = "neg_50.csv"
