@@ -25,25 +25,28 @@ def save_analysis_info(path, file_name, **kwargs):
         os.chmod(path + file_name, 0o777)
     
 def main():
+
     # user to specify: hyper-params
-    n_eval_folds = 5
-    n_cv_folds = 5  
+    n_eval_folds = 3
+    n_cv_folds = 3  
     
-    grid_n_trees = [200, 300]
-    grid_depth = [5,20]
+    grid_n_trees = [200]
+    grid_depth = [5]
+    minInstancesPerNode = [100]
+    featureSubsetStrategy = ["onethird"]
         
     # desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-    desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
+    desired_recalls = [0.05]
     
     
     
     # user to specify : seed in Random Forest model
     seed = 42
     # user to specify: input data location
-    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/clean_data/"
-    pos_file = "pos.csv"
-    neg_file = "neg.csv"
-    ss_file = "ss.csv"
+    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    pos_file = "pos_70.0pct.csv"
+    neg_file = "pos_70.0pct.csv"
+    ss_file = "pos_70.0pct.csv"
     # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
     # pos_file = "pos_50.csv"
     # neg_file = "neg_50.csv"
@@ -90,7 +93,6 @@ def main():
         os.makedirs(result_dir_s3, 0o777)
     if not os.path.exists(result_dir_master):
         os.makedirs(result_dir_master, 0o777)
-
     
     save_analysis_info(\
         result_dir_master, 
@@ -115,10 +117,10 @@ def main():
     assembler = VectorAssembler(inputCols=orgPredictorCols, outputCol=collectivePredictorCol)
     posFeatureAssembledData = assembler.transform(org_pos_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    posFeatureAssembledData.cache()
+    # posFeatureAssembledData.cache()
     negFeatureAssembledData = assembler.transform(org_neg_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    negFeatureAssembledData.cache()
+    # negFeatureAssembledData.cache()
     #
     evalIDCol = "evalFoldID"
     cvIDCol = "cvFoldID"
@@ -128,7 +130,7 @@ def main():
     
     ssFeatureAssembledData = assembler.transform(org_ss_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    ssFeatureAssembledData.cache()
+    # ssFeatureAssembledData.cache()
     
     
     # the model (pipeline)
@@ -143,6 +145,8 @@ def main():
     paramGrid = ParamGridBuilder()\
             .addGrid(rf.numTrees, grid_n_trees)\
             .addGrid(rf.maxDepth, grid_depth)\
+            .addGrid(rf.minInstancesPerNode, minInstancesPerNode)\
+            .addGrid(rf.featureSubsetStrategy, featureSubsetStrategy)\
             .build()
 
     # cross-evaluation
@@ -155,14 +159,16 @@ def main():
         leftoutFold = pos_neg_data_with_eval_ids.filter(condition)
         trainFolds = pos_neg_data_with_eval_ids.filter(~condition).drop(evalIDCol)
         trainDataWithCVFoldID = AppendDataMatchingFoldIDs(trainFolds, n_cv_folds, matchCol, foldCol=cvIDCol)
-
+        
         validator = CrossValidatorWithStratificationID(\
                         estimator=rf,
                         estimatorParamMaps=paramGrid,
                         evaluator=evaluator,
                         stratifyCol=cvIDCol\
                     )
+        trainDataWithCVFoldID.cache()
         cvModel = validator.fit(trainDataWithCVFoldID)
+        trainDataWithCVFoldID.unpersist()
         
         
         #
@@ -170,9 +176,9 @@ def main():
         testData = ssFeatureAssembledData\
             .join(leftoutFold.select(matchCol), matchCol)\
             .union(leftoutFold.drop(evalIDCol))
-        
+        testData.cache()
         predictions = cvModel.transform(testData)
-
+        
         if predictionsAllData is not None:
             predictionsAllData = predictionsAllData.unionAll(predictions)
         else:
@@ -196,6 +202,8 @@ def main():
                 filecvCoef.write("{0} : {1}".format(orgPredictorCols[id], cvModel.bestModel.featureImportances[id]))
                 filecvCoef.write("\n")
         os.chmod(result_dir_master + "importanceScoreFold" + str(iFold) + ".txt", 0o777)
+        
+        testData.unpersist()
 
     # save all predictions
     predictionsFileName = result_dir_s3 + "predictionsAllData"
