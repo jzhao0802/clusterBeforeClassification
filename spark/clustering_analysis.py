@@ -5,6 +5,7 @@ from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.mllib.clustering import KMeans
+import pyspark.sql.functions as F
 import numpy
 import os
 import time
@@ -53,7 +54,15 @@ def clustering(data_4_clustering_assembled, clustering_obj, clusterFeatureCol, c
         .toDF()
         
     return (cluster_model, result_with_dist)
-        
+
+def append_id(elem, new_elem_name):
+    row_elems = elem[0].asDict()
+    if new_elem_name in row_elems.keys():
+        raise ValueError(new_elem_name + "already exists in the original data frame. ")
+    row_elems[new_elem_name] = elem[1]
+    
+    return Row(**row_elems)
+    
 def main():
     #
     ## user to specify: hyper-params
@@ -61,6 +70,7 @@ def main():
     # clustering
     n_clusters = 3
     dist_threshold_percentile = 0.75
+    warn_threshold_np_ratio = 5
     
     # classification
     n_eval_folds = 3
@@ -202,7 +212,7 @@ def main():
     kmeans = KMeans(featureCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
     cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
-        
+    tmpIDCol = "_1"
 
     for iFold in range(n_eval_folds):
         
@@ -235,9 +245,30 @@ def main():
             corresponding_neg = trainFolds.filter(trainFolds[orgOutputCol]==0)
             corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
                 .select([patIDCol, matchCol] + [collectivePredictorCol])
+            n_negs_retained = round(corresponding_neg_4_clustering_assembled.count() * dist_threshold_percentile)
             similar_neg = corresponding_neg_4_clustering_assembled.rdd\
                 .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, cluster_model.clusterCenters()[i_cluster], distCol))\
-                .toDF()
+                .toDF()\
+                .sort(distCol, ascending=False)\
+                .rdd.zipWithIndex()\
+                .map(lambda x: append_id(x, tmpIDCol))\
+                .toDF()\
+                .filter(F.col(tmpIDCol)<n_retained)\
+                .drop(tmpIDCol)
+            
+            train_data = train_pos.union(similar_neg)
+            trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, n_cv_folds, matchCol, foldCol=cvIDCol)
+            # sanity check: if there are too few negatives for any positive 
+            thresh_n_neg_per_fold = round(train_pos.count() / float(n_cv_folds)) * warn_threshold_np_ratio
+            neg_counts_all_cv_folds = trainDataWithCVFoldID\
+                .filter(F.col(orgOutputCol)==0)\
+                .groupBy(cvIDCol)\
+                .agg(F.count(orgOutputCol).alias("_tmp"))\
+                .select("_tmp")\
+                .collect()
+            if any(map(lambda x: x < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
+                raise ValueError("Insufficient number of negative data in at least one cv fold.")
+                
             
             
             
@@ -245,10 +276,6 @@ def main():
         
         
         
-        Now AppendDataMatchingFoldIDs is tricky. There might not be enough negatives for some positives. 
-        just try two ways. 
-        
-        trainDataWithCVFoldID = AppendDataMatchingFoldIDs(trainFolds, n_cv_folds, matchCol, foldCol=cvIDCol)
         
         
         
@@ -274,6 +301,8 @@ def main():
             .join(leftoutFold.select(matchCol), matchCol)\
             .union(leftoutFold.drop(evalIDCol))
         
+        test also needs to be filterred first
+        
         predictions = cvModel.transform(testData)
 
         if predictionsAllData is not None:
@@ -287,6 +316,9 @@ def main():
         cvMetrics.coalesce(4).write.csv(cvMetricsFileName, header="true")
 
         # save the hyper-parameters of the best model
+        
+        result metrics need to be considered
+        
         bestParams = validator.getBestModelParams()
         with open(result_dir_master + "bestParamsFold" + str(iFold) + ".txt",
                   "w") as fileBestParams:
