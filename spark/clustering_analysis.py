@@ -4,6 +4,7 @@ from pyspark.sql.functions import udf
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
+from pyspark.mllib.clustering import KMeans
 import numpy
 import os
 import time
@@ -23,18 +24,58 @@ def save_analysis_info(path, file_name, **kwargs):
         for key, value in kwargs.iteritems():         
             file.write(key + ": " + str(value) + "\n")
         os.chmod(path + file_name, 0o777)
+
+def vec_to_numpy_pair_dist(p1_vec, p2_numpy_array):
+    return math.sqrt(p1_vec.squared_distance(p2_numpy_array))
+
+def compute_and_append_dist_to_numpy_array_point(row, clusterFeatureCol, target_point, distCol): 
+    vec1 = row[featureCol]
+    dist = math.sqrt(vec1.squared_distance(target_point))
+    elems = row.asDict()
+    if distCol in elems.keys():
+        raise ValueError("distCol already exists in the input data point. Please choose a new name.")
     
+    elems[distCol] = dist
+    
+    return Row(**elems)
+    
+def compute_and_append_in_cluster_dist(row, featureCol, clusterCol, centres, distCol):
+    cluster_id = row[clusterCol]
+    vec2 = centres[cluster_id] 
+    return compute_and_append_dist_to_numpy_array_point(row, clusterFeatureCol, vec2, distCol)
+        
+def clustering(data_4_clustering_assembled, clustering_obj, clusterFeatureCol, clusterCol, distCol): 
+    cluster_model = clustering_obj.fit(data_4_clustering_assembled)
+    cluster_result = cluster_model.transform(pos_data_4_clustering_assembled)
+    centres = cluster_model.clusterCenters()
+    result_with_dist = cluster_result.rdd\
+        .map(lambda x: compute_and_append_in_cluster_dist(x, clusterFeatureCol, clusterCol, centres, distCol))\
+        .toDF()
+        
+    return (cluster_model, result_with_dist)
+        
 def main():
-    # user to specify: hyper-params
-    n_eval_folds = 5
-    n_cv_folds = 5  
+    #
+    ## user to specify: hyper-params
     
-    grid_n_trees = [200, 300]
-    grid_depth = [5,20]
+    # clustering
+    n_clusters = 3
+    dist_threshold_percentile = 0.75
+    
+    # classification
+    n_eval_folds = 3
+    n_cv_folds = 3  
+    
+    grid_n_trees = [20, 30]
+    grid_depth = [3]
         
     # desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-    desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
+    desired_recalls = [0.05,0.10]
     
+    
+    
+    #
+    ## read data and some meta studff
     
     
     # user to specify : seed in Random Forest model
@@ -64,7 +105,8 @@ def main():
     # user to specify: original column names for predictors and output in data
     orgOutputCol = "label"
     matchCol = "matched_positive_id"
-    nonFeatureCols = ["matched_positive_id", "label", "patid"]
+    patIDCol = "patid"
+    nonFeatureCols = [matchCol, orgOutputCol, patIDCol]
     # sanity check 
     if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
@@ -76,8 +118,13 @@ def main():
     if type(org_ss_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
     org_ss_data = org_ss_data.withColumn(orgOutputCol, org_ss_data[orgOutputCol].cast("double"))
+    # 
+    clusterFeatureCol = "cluster_features"
+    clusterCol = "cluster_id"
     # user to specify: the collective column name for all predictors
     collectivePredictorCol = "features"
+    # in-cluster distance
+    distCol = "dist"
     # user to specify: the column name for prediction
     predictionCol = "probability"
     # user to specify: the output location on s3
@@ -110,7 +157,11 @@ def main():
         )
     
     
-
+    
+    
+    
+    
+    
     # convert to ml-compatible format
     assembler = VectorAssembler(inputCols=orgPredictorCols, outputCol=collectivePredictorCol)
     posFeatureAssembledData = assembler.transform(org_pos_data)\
@@ -147,6 +198,11 @@ def main():
 
     # cross-evaluation
     predictionsAllData = None
+    
+    kmeans = KMeans(featureCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
+    cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
+    
+        
 
     for iFold in range(n_eval_folds):
         
@@ -154,7 +210,54 @@ def main():
         condition = pos_neg_data_with_eval_ids[evalIDCol] == iFold
         leftoutFold = pos_neg_data_with_eval_ids.filter(condition)
         trainFolds = pos_neg_data_with_eval_ids.filter(~condition).drop(evalIDCol)
+        
+        #
+        ## clustering to be done here
+        
+        pos_data_4_clustering = trainFolds\
+            .filter(orgOutputCol==1)\
+            .select(patIDCol, matchCol)\
+            .join(org_pos_data, matchCol)
+        pos_data_4_clustering_assembled = cluster_assembler.transform(pos_data_4_clustering)\
+            .select([patIDCol, matchCol] + [collectivePredictorCol])
+        cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
+                                    clusterFeatureCol, clusterCol, distCol) 
+        
+        for i_cluster in range(n_clusters):
+            
+            # the positive data for training the classifier
+            train_pos = clustered_pos\
+                .filter(clustered_pos[clusterCol]==i_cluster)\
+                .select(patIDCol)\
+                .join(trainFolds, patIDCol)
+            
+            # select negative training data based on the clustering result
+            corresponding_neg = trainFolds.filter(trainFolds[orgOutputCol]==0)
+            corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
+                .select([patIDCol, matchCol] + [collectivePredictorCol])
+            similar_neg = corresponding_neg_4_clustering_assembled.rdd\
+                .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, cluster_model.clusterCenters()[i_cluster], distCol))\
+                .toDF()
+            
+            
+            
+        
+        
+        
+        
+        Now AppendDataMatchingFoldIDs is tricky. There might not be enough negatives for some positives. 
+        just try two ways. 
+        
         trainDataWithCVFoldID = AppendDataMatchingFoldIDs(trainFolds, n_cv_folds, matchCol, foldCol=cvIDCol)
+        
+        
+        
+        #
+        ## classification for each cluster
+        
+        
+        
+        
 
         validator = CrossValidatorWithStratificationID(\
                         estimator=rf,
