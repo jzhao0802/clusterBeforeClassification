@@ -75,7 +75,15 @@ def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering
         .toDF()\
         .filter(F.col(tmpIDCol)<num_to_retain)\
         .select(idCol)\
-    
+
+def save_metrics(file_name, dfMetrics): 
+    with open(file_name, "w") as file:
+        for elem in dfMetrics:
+            key = elem.keys()[0]
+            value = elem.values()[0]
+            file.write(key + "," + str(value) + "\n")
+    os.chmod(file_name, 0o777)
+        
 def main():
     #
     ## user to specify: hyper-params
@@ -249,6 +257,8 @@ def main():
         cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
                                     clusterFeatureCol, clusterCol, distCol) 
         
+        predictionsOneFold = None
+        
         for i_cluster in range(n_clusters):
             
             # the positive data for training the classifier
@@ -325,13 +335,19 @@ def main():
             
             # testing
             
-            predictions = cvModel.transformfilteredTestDataAssembled
+            predictions = cvModel.transformfilteredTestDataAssembled            
+            metricValuesOneCluster = evaluator\
+                .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
+            file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + i_cluster + "fold_" + iFold + "_.csv"
+            save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
+            
+            
 
-            if predictionsAllData is not None:
-                predictionsAllData = predictionsAllData.unionAll(predictions)
+            if predictionsOneFold is not None:
+                predictionsOneFold = predictionsOneFold.unionAll(predictions)
             else:
-                predictionsAllData = predictions
-            predictionsAllData.cache()
+                predictionsOneFold = predictions
+            predictionsOneFold.cache()
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
@@ -340,13 +356,25 @@ def main():
 
             # save the hyper-parameters of the best model
             
-            result metrics need to be considered
-            
             bestParams = validator.getBestModelParams()
             with open(result_dir_master + "bestParamsFold" + str(iFold) + ".txt",
                       "w") as fileBestParams:
                 fileBestParams.write(str(bestParams))
             os.chmod(result_dir_master + "bestParamsFold" + str(iFold) + ".txt", 0o777)
+            
+        
+        # summarise all clusters from the fold
+        
+        metricValuesOneFold = evaluator\
+            .evaluateWithSeveralMetrics(predictionsOneFold, metricSets = metricSets)            
+        file_name_metrics_one_fold = result_dir_master + "metrics_fold_" + iFold + "_.csv"
+        save_metrics(file_name_metrics_one_fold, metricValuesOneFold)
+        
+        if predictionsAllData is not None:
+            predictionsAllData = predictionsAllData.unionAll(predictionsOneFold)
+        else:
+            predictionsAllData = predictionsOneFold
+        predictionsAllData.cache()
             
 
     # save all predictions
@@ -358,12 +386,8 @@ def main():
     metricValues = evaluator\
         .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
     predictionsAllData.unpersist()
-    with open(result_dir_master + "metricValuesEntireData.csv", "w") as file:
-        for elem in metricValues:
-            key = elem.keys()[0]
-            value = elem.values()[0]
-            file.write(key + "," + str(value) + "\n")
-    os.chmod(result_dir_master + "metricValuesEntireData.csv", 0o777)
+    save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
+    
     spark.stop()
 
 if __name__ == "__main__":
