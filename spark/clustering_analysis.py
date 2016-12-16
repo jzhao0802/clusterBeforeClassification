@@ -63,6 +63,19 @@ def append_id(elem, new_elem_name):
     
     return Row(**row_elems)
     
+def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, threshold_percentile, idCol):
+    distCol = "_tmp_dist"
+    num_to_retain = round(assembled_data_4_clustering.count() * (1-threshold_percentile))
+    ids = assembled_data_4_clustering.rdd\
+        .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, centre, distCol))\
+        .toDF()\
+        .sort(distCol, ascending=False)\
+        .rdd.zipWithIndex()\
+        .map(lambda x: append_id(x, "_tmp_id"))\
+        .toDF()\
+        .filter(F.col(tmpIDCol)<num_to_retain)\
+        .select(idCol)\
+    
 def main():
     #
     ## user to specify: hyper-params
@@ -187,9 +200,9 @@ def main():
     pos_neg_data_with_eval_ids = AppendDataMatchingFoldIDs(pos_neg_data, n_eval_folds, matchCol, foldCol=evalIDCol)
     
     
-    ssFeatureAssembledData = assembler.transform(org_ss_data)\
-        .select(nonFeatureCols + [collectivePredictorCol])
-    ssFeatureAssembledData.cache()
+    # ssFeatureAssembledData = assembler.transform(org_ss_data)\
+        # .select(nonFeatureCols + [collectivePredictorCol])
+    # ssFeatureAssembledData.cache()
     
     
     # the model (pipeline)
@@ -213,6 +226,9 @@ def main():
     cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
     tmpIDCol = "_1"
+    
+    metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
+    
 
     for iFold in range(n_eval_folds):
         
@@ -245,18 +261,17 @@ def main():
             corresponding_neg = trainFolds.filter(trainFolds[orgOutputCol]==0)
             corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
                 .select([patIDCol, matchCol] + [collectivePredictorCol])
-            n_negs_retained = round(corresponding_neg_4_clustering_assembled.count() * dist_threshold_percentile)
-            similar_neg = corresponding_neg_4_clustering_assembled.rdd\
-                .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, cluster_model.clusterCenters()[i_cluster], distCol))\
-                .toDF()\
-                .sort(distCol, ascending=False)\
-                .rdd.zipWithIndex()\
-                .map(lambda x: append_id(x, tmpIDCol))\
-                .toDF()\
-                .filter(F.col(tmpIDCol)<n_retained)\
-                .drop(tmpIDCol)
+            similar_neg_ids = select_certain_pct_ids_closest_to_cluster_centre(\
+                corresponding_neg_4_clustering_assembled, 
+                clusterFeatureCol, 
+                cluster_model.clusterCenters()[i_cluster], 
+                dist_threshold_percentile, 
+                patIDCol
+            )
+            train_data = similar_neg_ids\
+                .join(trainFolds, patIDCol)\
+                .union(train_pos)
             
-            train_data = train_pos.union(similar_neg)
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, n_cv_folds, matchCol, foldCol=cvIDCol)
             # sanity check: if there are too few negatives for any positive 
             thresh_n_neg_per_fold = round(train_pos.count() / float(n_cv_folds)) * warn_threshold_np_ratio
@@ -270,67 +285,69 @@ def main():
                 raise ValueError("Insufficient number of negative data in at least one cv fold.")
                 
             
+        
+        
+            #
+            ## train the classifier     
+            
+
+            validator = CrossValidatorWithStratificationID(\
+                            estimator=rf,
+                            estimatorParamMaps=paramGrid,
+                            evaluator=evaluator,
+                            stratifyCol=cvIDCol\
+                        )
+            cvModel = validator.fit(trainDataWithCVFoldID)
             
             
-        
-        
-        
-        
-        
-        
-        
-        #
-        ## classification for each cluster
-        
-        
-        
-        
+            #
+            ## test data
+            
+            
+            entireTestData = org_ss_data\
+                .join(leftoutFold.filter(orgOutputCol==1).select(matchCol), matchCol)\
+                .union(org_pos_data.join(leftoutFold.select(patIDCol), patIDCol))\
+                .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol)
+            entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
+                    .select([patIDCol, matchCol] + [collectivePredictorCol])
+            
+            filteredTestData = select_certain_pct_ids_closest_to_cluster_centre(\
+                entireTestDataAssembled4Clustering, 
+                clusterFeatureCol, 
+                cluster_model.clusterCenters()[i_cluster], 
+                dist_threshold_percentile, 
+                patIDCol
+            ).join(entireTestData, patIDCol)
+            
+            filteredTestDataAssembled = assembler.transform(filteredTestData)\
+                .select(nonFeatureCols + [collectivePredictorCol])       
+            
+            
+            # testing
+            
+            predictions = cvModel.transformfilteredTestDataAssembled
 
-        validator = CrossValidatorWithStratificationID(\
-                        estimator=rf,
-                        estimatorParamMaps=paramGrid,
-                        evaluator=evaluator,
-                        stratifyCol=cvIDCol\
-                    )
-        cvModel = validator.fit(trainDataWithCVFoldID)
-        
-        
-        #
-        ## test data
-        testData = ssFeatureAssembledData\
-            .join(leftoutFold.select(matchCol), matchCol)\
-            .union(leftoutFold.drop(evalIDCol))
-        
-        test also needs to be filterred first
-        
-        predictions = cvModel.transform(testData)
+            if predictionsAllData is not None:
+                predictionsAllData = predictionsAllData.unionAll(predictions)
+            else:
+                predictionsAllData = predictions
+            predictionsAllData.cache()
+            
+            # save the metrics for all hyper-parameter sets in cv
+            cvMetrics = cvModel.avgMetrics
+            cvMetricsFileName = result_dir_s3 + "cvMetricsFold" + str(iFold)
+            cvMetrics.coalesce(4).write.csv(cvMetricsFileName, header="true")
 
-        if predictionsAllData is not None:
-            predictionsAllData = predictionsAllData.unionAll(predictions)
-        else:
-            predictionsAllData = predictions
-
-        # save the metrics for all hyper-parameter sets in cv
-        cvMetrics = cvModel.avgMetrics
-        cvMetricsFileName = result_dir_s3 + "cvMetricsFold" + str(iFold)
-        cvMetrics.coalesce(4).write.csv(cvMetricsFileName, header="true")
-
-        # save the hyper-parameters of the best model
-        
-        result metrics need to be considered
-        
-        bestParams = validator.getBestModelParams()
-        with open(result_dir_master + "bestParamsFold" + str(iFold) + ".txt",
-                  "w") as fileBestParams:
-            fileBestParams.write(str(bestParams))
-        os.chmod(result_dir_master + "bestParamsFold" + str(iFold) + ".txt", 0o777)
-        # save importance score of the best model
-        with open(result_dir_master + "importanceScoreFold" + str(iFold) + ".txt",
-                  "w") as filecvCoef:
-            for id in range(len(orgPredictorCols)):
-                filecvCoef.write("{0} : {1}".format(orgPredictorCols[id], cvModel.bestModel.featureImportances[id]))
-                filecvCoef.write("\n")
-        os.chmod(result_dir_master + "importanceScoreFold" + str(iFold) + ".txt", 0o777)
+            # save the hyper-parameters of the best model
+            
+            result metrics need to be considered
+            
+            bestParams = validator.getBestModelParams()
+            with open(result_dir_master + "bestParamsFold" + str(iFold) + ".txt",
+                      "w") as fileBestParams:
+                fileBestParams.write(str(bestParams))
+            os.chmod(result_dir_master + "bestParamsFold" + str(iFold) + ".txt", 0o777)
+            
 
     # save all predictions
     predictionsFileName = result_dir_s3 + "predictionsAllData"
@@ -338,9 +355,9 @@ def main():
                               getitem(1)(predictionCol).alias('prob_1'))\
         .write.csv(predictionsFileName, header="true")
     # metrics of predictions on the entire dataset
-    metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
     metricValues = evaluator\
         .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+    predictionsAllData.unpersist()
     with open(result_dir_master + "metricValuesEntireData.csv", "w") as file:
         for elem in metricValues:
             key = elem.keys()[0]
