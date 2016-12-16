@@ -111,17 +111,16 @@ def main():
     
     # user to specify : seed in Random Forest model
     seed = 42
-    # user to specify: input data location
-    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/clean_data/"
-    pos_file = "pos.csv"
-    neg_file = "neg.csv"
-    ss_file = "ss.csv"
     # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    # pos_file = "pos_50.csv"
-    # neg_file = "neg_50.csv"
-    # ss_file = "ss_50.csv"
+    # pos_file = "pos_70.0pct.csv"
+    # neg_file = "neg_70.0pct.csv"
+    # ss_file = "ss_70.0pct.csv"
+    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    pos_file = "pos_50.csv"
+    neg_file = "neg_50.csv"
+    ss_file = "ss_50.csv"
     #reading in the data from S3
-    spark = SparkSession.builder.appName(__file__).getOrCreate()
+    spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
         .option("inferSchema", "true")\
         .csv(data_path + pos_file)
