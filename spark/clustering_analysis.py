@@ -183,6 +183,7 @@ def main():
             predictionsAllData = predictionsAllData.unionAll(predictions)
         else:
             predictionsAllData = predictions
+        predictionsAllData.cache()
 
         # save the metrics for all hyper-parameter sets in cv
         cvMetrics = cvModel.avgMetrics
@@ -220,6 +221,7 @@ def main():
             value = elem.values()[0]
             file.write(key + "," + str(value) + "\n")
     os.chmod(result_dir_master + "metricValuesEntireData.csv", 0o777)
+    predictionsAllData.unpersist()
     spark.stop()
 
 if __name__ == "__main__":
