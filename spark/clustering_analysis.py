@@ -178,12 +178,13 @@ def main():
             .union(leftoutFold.drop(evalIDCol))
         testData.cache()
         predictions = cvModel.transform(testData)
+        predictions.write.csv(result_dir_s3+"predictions_fold_"+iFold+".csv")
         
-        if predictionsAllData is not None:
-            predictionsAllData = predictionsAllData.unionAll(predictions)
-        else:
-            predictionsAllData = predictions
-        predictionsAllData.cache()
+        # if predictionsAllData is not None:
+            # predictionsAllData = predictionsAllData.union(predictions)
+        # else:
+            # predictionsAllData = predictions
+        # predictionsAllData.cache()
 
         # save the metrics for all hyper-parameter sets in cv
         cvMetrics = cvModel.avgMetrics
@@ -206,22 +207,22 @@ def main():
         
         testData.unpersist()
 
-    # save all predictions
-    predictionsFileName = result_dir_s3 + "predictionsAllData"
-    predictionsAllData.select(orgOutputCol,
-                              getitem(1)(predictionCol).alias('prob_1'))\
-        .write.csv(predictionsFileName, header="true")
-    # metrics of predictions on the entire dataset
-    metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
-    metricValues = evaluator\
-        .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
-    with open(result_dir_master + "metricValuesEntireData.csv", "w") as file:
-        for elem in metricValues:
-            key = elem.keys()[0]
-            value = elem.values()[0]
-            file.write(key + "," + str(value) + "\n")
-    os.chmod(result_dir_master + "metricValuesEntireData.csv", 0o777)
-    predictionsAllData.unpersist()
+    # # save all predictions
+    # predictionsFileName = result_dir_s3 + "predictionsAllData"
+    # predictionsAllData.select(orgOutputCol,
+                              # getitem(1)(predictionCol).alias('prob_1'))\
+        # .write.csv(predictionsFileName, header="true")
+    # # metrics of predictions on the entire dataset
+    # metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
+    # metricValues = evaluator\
+        # .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+    # with open(result_dir_master + "metricValuesEntireData.csv", "w") as file:
+        # for elem in metricValues:
+            # key = elem.keys()[0]
+            # value = elem.values()[0]
+            # file.write(key + "," + str(value) + "\n")
+    # os.chmod(result_dir_master + "metricValuesEntireData.csv", 0o777)
+    # predictionsAllData.unpersist()
     spark.stop()
 
 if __name__ == "__main__":
