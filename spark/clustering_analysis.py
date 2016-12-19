@@ -165,7 +165,7 @@ def main(result_dir_master, result_dir_s3):
         #
         ## test data
         testData = ssFeatureAssembledData\
-            .join(leftoutFold.select(patIDCol), patIDCol)\
+            .join(leftoutFold.select(matchCol).distinct(), matchCol)\
             .union(leftoutFold.drop(evalIDCol))
         testData.cache()
         predictions = cvModel.transform(testData)
