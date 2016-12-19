@@ -39,7 +39,6 @@ def compute_and_append_dist_to_numpy_array_point(row, clusterFeatureCol, target_
     
     return Row(**elems)
     
-<<<<<<< HEAD
 def compute_and_append_in_cluster_dist(row, featureCol, clusterCol, centres, distCol):
     cluster_id = row[clusterCol]
     vec2 = centres[cluster_id] 
@@ -90,7 +89,7 @@ def main(result_dir_master, result_dir_s3):
     
     # clustering
     n_clusters = 3
-    dist_threshold_percentile = 0.75
+    dist_threshold_percentile = 0.1
     warn_threshold_np_ratio = 5
     
     # classification
@@ -116,9 +115,9 @@ def main(result_dir_master, result_dir_s3):
     # neg_file = "neg_70.0pct.csv"
     # ss_file = "ss_70.0pct.csv"
     data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    pos_file = "pos_10.csv"
-    neg_file = "neg_10.csv"
-    ss_file = "ss_10.csv"
+    pos_file = "pos_10.0pct.csv"
+    neg_file = "neg_10.0pct.csv"
+    ss_file = "ss_10.0pct.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
@@ -306,7 +305,7 @@ def main(result_dir_master, result_dir_s3):
             entireTestData = org_ss_data\
                 .join(leftoutFold.filter(orgOutputCol==1).select(matchCol), matchCol)\
                 .union(org_pos_data.join(leftoutFold.select(patIDCol), patIDCol))\
-                .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol)
+                .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol))
             entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
                     .select([patIDCol, matchCol] + [collectivePredictorCol])
             
@@ -329,6 +328,7 @@ def main(result_dir_master, result_dir_s3):
                 .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + i_cluster + "fold_" + iFold + "_.csv"
             save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
+            predictions.write.csv(result_dir_s3 + "predictions_fold_" + iFold + "_cluster_" + i_cluster + ".csv")
             
             
 
@@ -336,7 +336,7 @@ def main(result_dir_master, result_dir_s3):
                 predictionsOneFold = predictionsOneFold.unionAll(predictions)
             else:
                 predictionsOneFold = predictions
-            predictionsOneFold.cache()
+            # predictionsOneFold.cache()
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
@@ -366,16 +366,16 @@ def main(result_dir_master, result_dir_s3):
         predictionsAllData.cache()
             
 
-    # save all predictions
-    predictionsFileName = result_dir_s3 + "predictionsAllData"
-    predictionsAllData.select(orgOutputCol,
-                              getitem(1)(predictionCol).alias('prob_1'))\
-        .write.csv(predictionsFileName, header="true")
-    # metrics of predictions on the entire dataset
-    metricValues = evaluator\
-        .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
-    predictionsAllData.unpersist()
-    save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
+    # # save all predictions
+    # predictionsFileName = result_dir_s3 + "predictionsAllData"
+    # predictionsAllData.select(orgOutputCol,
+                              # getitem(1)(predictionCol).alias('prob_1'))\
+        # .write.csv(predictionsFileName, header="true")
+    # # metrics of predictions on the entire dataset
+    # metricValues = evaluator\
+        # .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+    # predictionsAllData.unpersist()
+    # save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
     
     spark.stop()
 
