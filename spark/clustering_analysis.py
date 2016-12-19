@@ -178,7 +178,7 @@ def main():
             .union(leftoutFold.drop(evalIDCol))
         testData.cache()
         predictions = cvModel.transform(testData)
-        predictions.write.csv(result_dir_s3+"predictions_fold_"+iFold+".csv")
+        predictions.write.csv(result_dir_s3+"predictions_fold_"+str(iFold)+".csv", header="true")
         
         # if predictionsAllData is not None:
             # predictionsAllData = predictionsAllData.union(predictions)
