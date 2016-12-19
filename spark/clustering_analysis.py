@@ -67,6 +67,7 @@ def main():
     # user to specify: original column names for predictors and output in data
     orgOutputCol = "label"
     matchCol = "matched_positive_id"
+    patIDCol = "patid"
     nonFeatureCols = ["matched_positive_id", "label", "patid"]
     # sanity check 
     if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
@@ -174,7 +175,7 @@ def main():
         #
         ## test data
         testData = ssFeatureAssembledData\
-            .join(leftoutFold.select(matchCol), matchCol)\
+            .join(leftoutFold.select(patIDCol), patIDCol)\
             .union(leftoutFold.drop(evalIDCol))
         testData.cache()
         predictions = cvModel.transform(testData)
