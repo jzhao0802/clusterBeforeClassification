@@ -6,8 +6,7 @@ from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
 import numpy
 import os
-import time
-import datetime
+import sys
 from stratification import AppendDataMatchingFoldIDs
 from imspacv import CrossValidatorWithStratificationID
 from imspaeva import BinaryClassificationEvaluatorWithPrecisionAtRecall
@@ -24,8 +23,8 @@ def save_analysis_info(path, file_name, **kwargs):
             file.write(key + ": " + str(value) + "\n")
         os.chmod(path + file_name, 0o777)
     
-def main():
 
+def main(result_dir_master, result_dir_s3):
     # user to specify: hyper-params
     n_eval_folds = 3
     n_cv_folds = 3  
@@ -84,16 +83,7 @@ def main():
     collectivePredictorCol = "features"
     # user to specify: the column name for prediction
     predictionCol = "probability"
-    # user to specify: the output location on s3
-    start_time = time.time()
-    st = datetime.datetime.fromtimestamp(start_time).strftime('%Y%m%d_%H%M%S')
-    result_dir_s3 = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/Results/" + st + "/"
-    # user to specify the output location on master
-    result_dir_master = "/home/lichao.wang/code/lichao/test/Results/" + st + "/"
-    if not os.path.exists(result_dir_s3):
-        os.makedirs(result_dir_s3, 0o777)
-    if not os.path.exists(result_dir_master):
-        os.makedirs(result_dir_master, 0o777)
+
     
     save_analysis_info(\
         result_dir_master, 
@@ -227,4 +217,4 @@ def main():
     spark.stop()
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1],sys.argv[2])
