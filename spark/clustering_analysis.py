@@ -4,7 +4,7 @@ from pyspark.sql.functions import udf
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
-from pyspark.mllib.clustering import KMeans
+from pyspark.ml.clustering import KMeans
 import pyspark.sql.functions as F
 import numpy
 import os
@@ -141,6 +141,7 @@ def main(result_dir_master, result_dir_s3):
         raise TypeError("The output column is not of type integer or double. ")
     org_pos_data = org_pos_data.withColumn(orgOutputCol, org_pos_data[orgOutputCol].cast("double"))
     orgPredictorCols = [x for x in org_pos_data.columns if x not in nonFeatureCols]    
+    orgPredictorCols4Clustering = [x for x in orgPredictorCols if "FLAG" in x]
     if type(org_neg_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
     org_neg_data = org_neg_data.withColumn(orgOutputCol, org_neg_data[orgOutputCol].cast("double"))
@@ -172,7 +173,7 @@ def main(result_dir_master, result_dir_s3):
         neg_file=neg_file,
         ss_file=ss_file,
         result_dir_s3=result_dir_s3,
-        result_dir_master=result_dir_master
+        result_dir_master=result_dir_master,
         n_clusters = n_clusters,
         dist_threshold_percentile = dist_threshold_percentile,
         warn_threshold_np_ratio = warn_threshold_np_ratio
@@ -221,7 +222,7 @@ def main(result_dir_master, result_dir_s3):
     # cross-evaluation
     predictionsAllData = None
     
-    kmeans = KMeans(featureCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
+    kmeans = KMeans(featuresCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
     cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
     tmpIDCol = "_1"
@@ -240,8 +241,8 @@ def main(result_dir_master, result_dir_s3):
         ## clustering to be done here
         
         pos_data_4_clustering = trainFolds\
-            .filter(orgOutputCol==1)\
-            .select(patIDCol, matchCol)\
+            .filter(F.col(orgOutputCol)==1)\
+            .select(matchCol)\
             .join(org_pos_data, matchCol)
         pos_data_4_clustering_assembled = cluster_assembler.transform(pos_data_4_clustering)\
             .select([patIDCol, matchCol] + [collectivePredictorCol])
