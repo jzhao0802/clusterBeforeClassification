@@ -173,6 +173,9 @@ def main(result_dir_master, result_dir_s3):
         ss_file=ss_file,
         result_dir_s3=result_dir_s3,
         result_dir_master=result_dir_master
+        n_clusters = n_clusters,
+        dist_threshold_percentile = dist_threshold_percentile,
+        warn_threshold_np_ratio = warn_threshold_np_ratio
         )
     
     
