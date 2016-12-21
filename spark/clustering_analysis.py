@@ -336,9 +336,9 @@ def main(result_dir_master, result_dir_s3):
             predictions = cvModel.transform(filteredTestDataAssembled)
             metricValuesOneCluster = evaluator\
                 .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
-            file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + i_cluster + "fold_" + iFold + "_.csv"
+            file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
             save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
-            predictions.write.csv(result_dir_s3 + "predictions_fold_" + iFold + "_cluster_" + i_cluster + ".csv")
+            predictions.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
             
             
 
@@ -366,7 +366,7 @@ def main(result_dir_master, result_dir_s3):
         
         metricValuesOneFold = evaluator\
             .evaluateWithSeveralMetrics(predictionsOneFold, metricSets = metricSets)            
-        file_name_metrics_one_fold = result_dir_master + "metrics_fold_" + iFold + "_.csv"
+        file_name_metrics_one_fold = result_dir_master + "metrics_fold_" + str(iFold) + "_.csv"
         save_metrics(file_name_metrics_one_fold, metricValuesOneFold)
         
         if predictionsAllData is not None:
