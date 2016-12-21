@@ -1,4 +1,4 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Row
 from pyspark.sql.types import StructType, StructField, DoubleType, IntegerType, StringType
 from pyspark.sql.functions import udf
 from pyspark.ml.feature import VectorAssembler
@@ -9,6 +9,7 @@ import pyspark.sql.functions as F
 import numpy
 import os
 import sys
+import math
 from stratification import AppendDataMatchingFoldIDs
 from imspacv import CrossValidatorWithStratificationID
 from imspaeva import BinaryClassificationEvaluatorWithPrecisionAtRecall
@@ -28,7 +29,7 @@ def save_analysis_info(path, file_name, **kwargs):
 def vec_to_numpy_pair_dist(p1_vec, p2_numpy_array):
     return math.sqrt(p1_vec.squared_distance(p2_numpy_array))
 
-def compute_and_append_dist_to_numpy_array_point(row, clusterFeatureCol, target_point, distCol): 
+def compute_and_append_dist_to_numpy_array_point(row, featureCol, target_point, distCol): 
     vec1 = row[featureCol]
     dist = math.sqrt(vec1.squared_distance(target_point))
     elems = row.asDict()
@@ -42,11 +43,11 @@ def compute_and_append_dist_to_numpy_array_point(row, clusterFeatureCol, target_
 def compute_and_append_in_cluster_dist(row, featureCol, clusterCol, centres, distCol):
     cluster_id = row[clusterCol]
     vec2 = centres[cluster_id] 
-    return compute_and_append_dist_to_numpy_array_point(row, clusterFeatureCol, vec2, distCol)
+    return compute_and_append_dist_to_numpy_array_point(row, featureCol, vec2, distCol)
         
 def clustering(data_4_clustering_assembled, clustering_obj, clusterFeatureCol, clusterCol, distCol): 
     cluster_model = clustering_obj.fit(data_4_clustering_assembled)
-    cluster_result = cluster_model.transform(pos_data_4_clustering_assembled)
+    cluster_result = cluster_model.transform(data_4_clustering_assembled)
     centres = cluster_model.clusterCenters()
     result_with_dist = cluster_result.rdd\
         .map(lambda x: compute_and_append_in_cluster_dist(x, clusterFeatureCol, clusterCol, centres, distCol))\
@@ -72,8 +73,10 @@ def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering
         .rdd.zipWithIndex()\
         .map(lambda x: append_id(x, "_tmp_id"))\
         .toDF()\
-        .filter(F.col(tmpIDCol)<num_to_retain)\
-        .select(idCol)\
+        .filter(F.col("_tmp_id")<num_to_retain)\
+        .select(idCol)
+        
+    return ids
 
 def save_metrics(file_name, dfMetrics): 
     with open(file_name, "w") as file:
@@ -89,7 +92,7 @@ def main(result_dir_master, result_dir_s3):
     
     # clustering
     n_clusters = 3
-    dist_threshold_percentile = 0.1
+    dist_threshold_percentile = 0.9
     warn_threshold_np_ratio = 5
     
     # classification
@@ -125,10 +128,12 @@ def main(result_dir_master, result_dir_s3):
         .csv(data_path + pos_file)
     org_neg_data = spark.read.option("header", "true")\
         .option("inferSchema", "true")\
-        .csv(data_path + neg_file)    
+        .csv(data_path + neg_file)\
+        .select(org_pos_data.columns)
     org_ss_data = spark.read.option("header", "true")\
         .option("inferSchema", "true")\
-        .csv(data_path +ss_file)
+        .csv(data_path +ss_file)\
+        .select(org_pos_data.columns)
     
     
     # user to specify: original column names for predictors and output in data
@@ -225,8 +230,6 @@ def main(result_dir_master, result_dir_s3):
     kmeans = KMeans(featuresCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
     cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
-    tmpIDCol = "_1"
-    
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
     
 
@@ -245,7 +248,7 @@ def main(result_dir_master, result_dir_s3):
             .select(matchCol)\
             .join(org_pos_data, matchCol)
         pos_data_4_clustering_assembled = cluster_assembler.transform(pos_data_4_clustering)\
-            .select([patIDCol, matchCol] + [collectivePredictorCol])
+            .select([patIDCol, matchCol] + [clusterFeatureCol])
         cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
                                     clusterFeatureCol, clusterCol, distCol) 
         
@@ -260,9 +263,11 @@ def main(result_dir_master, result_dir_s3):
                 .join(trainFolds, patIDCol)
             
             # select negative training data based on the clustering result
-            corresponding_neg = trainFolds.filter(trainFolds[orgOutputCol]==0)
+            corresponding_neg = train_pos\
+                .select(matchCol)\
+                .join(org_neg_data, matchCol)
             corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
-                .select([patIDCol, matchCol] + [collectivePredictorCol])
+                .select([patIDCol, matchCol] + [clusterFeatureCol])
             similar_neg_ids = select_certain_pct_ids_closest_to_cluster_centre(\
                 corresponding_neg_4_clustering_assembled, 
                 clusterFeatureCol, 
@@ -272,6 +277,7 @@ def main(result_dir_master, result_dir_s3):
             )
             train_data = similar_neg_ids\
                 .join(trainFolds, patIDCol)\
+                .select(train_pos.columns)\
                 .union(train_pos)
             
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, n_cv_folds, matchCol, foldCol=cvIDCol)
@@ -283,7 +289,7 @@ def main(result_dir_master, result_dir_s3):
                 .agg(F.count(orgOutputCol).alias("_tmp"))\
                 .select("_tmp")\
                 .collect()
-            if any(map(lambda x: x < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
+            if any(map(lambda x: x["_tmp"] < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
                 raise ValueError("Insufficient number of negative data in at least one cv fold.")
                 
             
@@ -307,11 +313,11 @@ def main(result_dir_master, result_dir_s3):
             
             
             entireTestData = org_ss_data\
-                .join(leftoutFold.filter(orgOutputCol==1).select(matchCol), matchCol)\
-                .union(org_pos_data.join(leftoutFold.select(patIDCol), patIDCol))\
-                .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol))
+                .join(leftoutFold.filter(F.col(orgOutputCol)==1).select(matchCol), matchCol).select(org_pos_data.columns)\
+                .union(org_pos_data.join(leftoutFold.select(patIDCol), patIDCol).select(org_pos_data.columns))\
+                .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol).select(org_pos_data.columns))
             entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
-                    .select([patIDCol, matchCol] + [collectivePredictorCol])
+                    .select([patIDCol, matchCol] + [clusterFeatureCol])
             
             filteredTestData = select_certain_pct_ids_closest_to_cluster_centre(\
                 entireTestDataAssembled4Clustering, 
@@ -327,7 +333,7 @@ def main(result_dir_master, result_dir_s3):
             
             # testing
             
-            predictions = cvModel.transformfilteredTestDataAssembled            
+            predictions = cvModel.transform(filteredTestDataAssembled)
             metricValuesOneCluster = evaluator\
                 .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + i_cluster + "fold_" + iFold + "_.csv"
