@@ -350,16 +350,16 @@ def main(result_dir_master, result_dir_s3):
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
-            cvMetricsFileName = result_dir_s3 + "cvMetricsFold" + str(iFold)
+            cvMetricsFileName = result_dir_s3 + "cvMetrics_cluster_" + str(i_cluster) + "_fold_" + str(iFold)
             cvMetrics.coalesce(4).write.csv(cvMetricsFileName, header="true")
 
             # save the hyper-parameters of the best model
             
             bestParams = validator.getBestModelParams()
-            with open(result_dir_master + "bestParamsFold" + str(iFold) + ".txt",
-                      "w") as fileBestParams:
+            file_best_params = result_dir_master + "bestParams_cluster_" + str(i_cluster) + "_fold_" + str(iFold) + ".txt"
+            with open(file_best_params, "w") as fileBestParams:
                 fileBestParams.write(str(bestParams))
-            os.chmod(result_dir_master + "bestParamsFold" + str(iFold) + ".txt", 0o777)
+            os.chmod(file_best_params, 0o777)
             
         
         # summarise all clusters from the fold
