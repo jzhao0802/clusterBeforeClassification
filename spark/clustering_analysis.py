@@ -63,19 +63,20 @@ def append_id(elem, new_elem_name):
     
     return Row(**row_elems)
     
-def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, threshold_percentile, idCol):
+def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, threshold_percentile, idCol, matchCol):
     distCol = "_tmp_dist"
-    num_to_retain = round(assembled_data_4_clustering.count() * (1-threshold_percentile))
-    ids = assembled_data_4_clustering.rdd\
+    nPoses = assembled_data_4_clustering.select(matchCol).distinct().count()
+    num_to_retain = round(assembled_data_4_clustering.count() / float(nPoses) * (1-threshold_percentile))
+    dist_df = assembled_data_4_clustering.rdd\
         .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, centre, distCol))\
-        .toDF()\
-        .sort(distCol, ascending=False)\
-        .rdd.zipWithIndex()\
-        .map(lambda x: append_id(x, "_tmp_id"))\
-        .toDF()\
-        .filter(F.col("_tmp_id")<num_to_retain)\
-        .select(idCol)
+        .toDF()
+    dist_df.registerTempTable("dist_table")
+    ids = assembled_data_4_clustering.sql_ctx.sql(\
+        "SELECT " + idCol + " FROM (SELECT *, row_number() OVER(PARTITION BY " + matchCol + " ORDER BY " + distCol + " DESC) AS tmp_rank FROM dist_table) WHERE tmp_rank <=" + num_to_retain
+    )
         
+    spark.catalog.dropTempView("dist_table")
+    
     return ids
 
 def save_metrics(file_name, dfMetrics): 
@@ -273,7 +274,8 @@ def main(result_dir_master, result_dir_s3):
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
                 dist_threshold_percentile, 
-                patIDCol
+                patIDCol,
+                matchCol
             )
             train_data = similar_neg_ids\
                 .join(trainFolds, patIDCol)\
@@ -324,7 +326,8 @@ def main(result_dir_master, result_dir_s3):
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
                 dist_threshold_percentile, 
-                patIDCol
+                patIDCol,
+                matchCol
             ).join(entireTestData, patIDCol)
             
             filteredTestDataAssembled = assembler.transform(filteredTestData)\
