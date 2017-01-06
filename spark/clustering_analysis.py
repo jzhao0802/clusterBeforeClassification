@@ -63,7 +63,7 @@ def append_id(elem, new_elem_name):
     
     return Row(**row_elems)
     
-def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, similar_pct, idCol, matchCol):
+def select_certain_pct_ids_per_positive_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, similar_pct, idCol, matchCol):
     distCol = "_tmp_dist"
     nPoses = assembled_data_4_clustering.select(matchCol).distinct().count()
     num_to_retain = round(assembled_data_4_clustering.count() / float(nPoses) * similar_pct)
@@ -79,6 +79,21 @@ def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering
     
     return ids
 
+def select_certain_pct_overall_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, similar_pct, idCol):
+    distCol = "_tmp_dist"
+    num_to_retain = round(assembled_data_4_clustering.count() * similar_pct)
+    ids = assembled_data_4_clustering.rdd\
+        .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, centre, distCol))\
+        .toDF()\
+        .sort(distCol, ascending=False)\
+        .rdd.zipWithIndex()\
+        .map(lambda x: append_id(x, "_tmp_id"))\
+        .toDF()\
+        .filter(F.col("_tmp_id") < num_to_retain)\
+        .select(idCol)
+        
+    return ids
+    
 def save_metrics(file_name, dfMetrics): 
     with open(file_name, "w") as file:
         for elem in dfMetrics:
@@ -269,7 +284,7 @@ def main(result_dir_master, result_dir_s3):
                 .join(org_neg_data, matchCol)
             corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
                 .select([patIDCol, matchCol] + [clusterFeatureCol])
-            similar_neg_ids = select_certain_pct_ids_closest_to_cluster_centre(\
+            similar_neg_ids = select_certain_pct_ids_per_positive_closest_to_cluster_centre(\
                 corresponding_neg_4_clustering_assembled, 
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
@@ -321,13 +336,12 @@ def main(result_dir_master, result_dir_s3):
             entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
                     .select([patIDCol, matchCol] + [clusterFeatureCol])
             
-            filteredTestData = select_certain_pct_ids_closest_to_cluster_centre(\
+            filteredTestData = select_certain_pct_overall_ids_closest_to_cluster_centre(\
                 entireTestDataAssembled4Clustering, 
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
                 posPctThisClusterVSAllClusters, 
-                patIDCol,
-                matchCol
+                patIDCol
             ).join(entireTestData, patIDCol)
             
             filteredTestDataAssembled = assembler.transform(filteredTestData)\
