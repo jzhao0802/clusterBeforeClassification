@@ -93,7 +93,7 @@ def main(result_dir_master, result_dir_s3):
     
     # clustering
     n_clusters = 3
-    dist_threshold_percentile = 0.9
+    similar_neg_percentile = 0.1
     warn_threshold_np_ratio = 5
     
     # classification
@@ -181,7 +181,7 @@ def main(result_dir_master, result_dir_s3):
         result_dir_s3=result_dir_s3,
         result_dir_master=result_dir_master,
         n_clusters = n_clusters,
-        dist_threshold_percentile = dist_threshold_percentile,
+        similar_neg_percentile = similar_neg_percentile,
         warn_threshold_np_ratio = warn_threshold_np_ratio
         )
     
