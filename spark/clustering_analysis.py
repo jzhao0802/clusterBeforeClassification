@@ -75,7 +75,7 @@ def select_certain_pct_ids_per_positive_closest_to_cluster_centre(assembled_data
         "SELECT " + idCol + " FROM (SELECT *, row_number() OVER(PARTITION BY " + matchCol + " ORDER BY " + distCol + " DESC) AS tmp_rank FROM dist_table) WHERE tmp_rank <=" + str(num_to_retain)
     )
         
-    spark.catalog.dropTempView("dist_table")
+    SparkSession.builder.getOrCreate().catalog.dropTempView("dist_table")
     
     return ids
 
@@ -133,9 +133,9 @@ def main(result_dir_master, result_dir_s3):
     # neg_file = "neg_70.0pct.csv"
     # ss_file = "ss_70.0pct.csv"
     data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    pos_file = "pos_10.0pct.csv"
-    neg_file = "neg_10.0pct.csv"
-    ss_file = "ss_10.0pct.csv"
+    pos_file = "pos_1.0pct.csv"
+    neg_file = "neg_1.0pct.csv"
+    ss_file = "ss_1.0pct.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
