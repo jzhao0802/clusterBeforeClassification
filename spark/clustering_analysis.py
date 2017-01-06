@@ -63,9 +63,9 @@ def append_id(elem, new_elem_name):
     
     return Row(**row_elems)
     
-def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, threshold_percentile, idCol):
+def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, similar_pct, idCol):
     distCol = "_tmp_dist"
-    num_to_retain = round(assembled_data_4_clustering.count() * (1-threshold_percentile))
+    num_to_retain = round(assembled_data_4_clustering.count() * similar_pct)
     ids = assembled_data_4_clustering.rdd\
         .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, centre, distCol))\
         .toDF()\
@@ -92,7 +92,7 @@ def main(result_dir_master, result_dir_s3):
     
     # clustering
     n_clusters = 3
-    dist_threshold_percentile = 0.9
+    similar_neg_percentile = 0.1
     warn_threshold_np_ratio = 5
     
     # classification
@@ -180,7 +180,7 @@ def main(result_dir_master, result_dir_s3):
         result_dir_s3=result_dir_s3,
         result_dir_master=result_dir_master,
         n_clusters = n_clusters,
-        dist_threshold_percentile = dist_threshold_percentile,
+        similar_neg_percentile = similar_neg_percentile,
         warn_threshold_np_ratio = warn_threshold_np_ratio
         )
     
@@ -272,7 +272,7 @@ def main(result_dir_master, result_dir_s3):
                 corresponding_neg_4_clustering_assembled, 
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
-                dist_threshold_percentile, 
+                similar_neg_percentile, 
                 patIDCol
             )
             train_data = similar_neg_ids\
@@ -323,7 +323,7 @@ def main(result_dir_master, result_dir_s3):
                 entireTestDataAssembled4Clustering, 
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
-                dist_threshold_percentile, 
+                similar_neg_percentile, 
                 patIDCol
             ).join(entireTestData, patIDCol)
             
