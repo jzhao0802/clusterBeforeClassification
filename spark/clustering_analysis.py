@@ -63,10 +63,10 @@ def append_id(elem, new_elem_name):
     
     return Row(**row_elems)
     
-def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, threshold_percentile, idCol, matchCol):
+def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering, clusterFeatureCol, centre, similar_pct, idCol, matchCol):
     distCol = "_tmp_dist"
     nPoses = assembled_data_4_clustering.select(matchCol).distinct().count()
-    num_to_retain = round(assembled_data_4_clustering.count() / float(nPoses) * (1-threshold_percentile))
+    num_to_retain = round(assembled_data_4_clustering.count() / float(nPoses) * similar_pct)
     dist_df = assembled_data_4_clustering.rdd\
         .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, centre, distCol))\
         .toDF()
@@ -93,7 +93,6 @@ def main(result_dir_master, result_dir_s3):
     
     # clustering
     n_clusters = 3
-    similar_neg_percentile = 0.1
     warn_threshold_np_ratio = 5
     
     # classification
@@ -181,7 +180,6 @@ def main(result_dir_master, result_dir_s3):
         result_dir_s3=result_dir_s3,
         result_dir_master=result_dir_master,
         n_clusters = n_clusters,
-        similar_neg_percentile = similar_neg_percentile,
         warn_threshold_np_ratio = warn_threshold_np_ratio
         )
     
@@ -253,6 +251,7 @@ def main(result_dir_master, result_dir_s3):
         cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
                                     clusterFeatureCol, clusterCol, distCol) 
         
+        nPosesAllClusters = clustered_pos.count()
         predictionsOneFold = None
         
         for i_cluster in range(n_clusters):
@@ -263,6 +262,7 @@ def main(result_dir_master, result_dir_s3):
                 .select(patIDCol)\
                 .join(trainFolds, patIDCol)
             
+            posPctThisClusterVSAllClusters = float(train_pos.count()) / nPosesAllClusters
             # select negative training data based on the clustering result
             corresponding_neg = train_pos\
                 .select(matchCol)\
@@ -273,7 +273,7 @@ def main(result_dir_master, result_dir_s3):
                 corresponding_neg_4_clustering_assembled, 
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
-                dist_threshold_percentile, 
+                posPctThisClusterVSAllClusters, 
                 patIDCol,
                 matchCol
             )
@@ -325,7 +325,7 @@ def main(result_dir_master, result_dir_s3):
                 entireTestDataAssembled4Clustering, 
                 clusterFeatureCol, 
                 cluster_model.clusterCenters()[i_cluster], 
-                dist_threshold_percentile, 
+                posPctThisClusterVSAllClusters, 
                 patIDCol,
                 matchCol
             ).join(entireTestData, patIDCol)
