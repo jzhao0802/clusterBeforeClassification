@@ -72,7 +72,7 @@ def select_certain_pct_ids_closest_to_cluster_centre(assembled_data_4_clustering
         .toDF()
     dist_df.registerTempTable("dist_table")
     ids = assembled_data_4_clustering.sql_ctx.sql(\
-        "SELECT " + idCol + " FROM (SELECT *, row_number() OVER(PARTITION BY " + matchCol + " ORDER BY " + distCol + " DESC) AS tmp_rank FROM dist_table) WHERE tmp_rank <=" + num_to_retain
+        "SELECT " + idCol + " FROM (SELECT *, row_number() OVER(PARTITION BY " + matchCol + " ORDER BY " + distCol + " DESC) AS tmp_rank FROM dist_table) WHERE tmp_rank <=" + str(num_to_retain)
     )
         
     spark.catalog.dropTempView("dist_table")
