@@ -4,7 +4,7 @@ from pyspark.sql.functions import udf
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
-from pyspark.ml.clustering import KMeans
+# from pyspark.ml.clustering import KMeans
 import pyspark.sql.functions as F
 import numpy
 import os
@@ -208,10 +208,10 @@ def main(result_dir_master, result_dir_s3):
     assembler = VectorAssembler(inputCols=orgPredictorCols, outputCol=collectivePredictorCol)
     posFeatureAssembledData = assembler.transform(org_pos_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    posFeatureAssembledData.cache()
+    # posFeatureAssembledData.cache()
     negFeatureAssembledData = assembler.transform(org_neg_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    negFeatureAssembledData.cache()
+    # negFeatureAssembledData.cache()
     #
     evalIDCol = "evalFoldID"
     cvIDCol = "cvFoldID"
@@ -241,8 +241,8 @@ def main(result_dir_master, result_dir_s3):
     # cross-evaluation
     predictionsAllData = None
     
-    kmeans = KMeans(featuresCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
-    cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
+    # kmeans = KMeans(featuresCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
+    # cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
     
@@ -257,57 +257,58 @@ def main(result_dir_master, result_dir_s3):
         #
         ## clustering to be done here
         
-        pos_data_4_clustering = trainFolds\
-            .filter(F.col(orgOutputCol)==1)\
-            .select(matchCol)\
-            .join(org_pos_data, matchCol)
-        pos_data_4_clustering_assembled = cluster_assembler.transform(pos_data_4_clustering)\
-            .select([patIDCol, matchCol] + [clusterFeatureCol])
-        cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
-                                    clusterFeatureCol, clusterCol, distCol) 
+        # pos_data_4_clustering = trainFolds\
+            # .filter(F.col(orgOutputCol)==1)\
+            # .select(matchCol)\
+            # .join(org_pos_data, matchCol)
+        # pos_data_4_clustering_assembled = cluster_assembler.transform(pos_data_4_clustering)\
+            # .select([patIDCol, matchCol] + [clusterFeatureCol])
+        # cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
+                                    # clusterFeatureCol, clusterCol, distCol) 
         
-        nPosesAllClusters = clustered_pos.count()
+        # nPosesAllClusters = clustered_pos.count()
         predictionsOneFold = None
         
         for i_cluster in range(n_clusters):
             
-            # the positive data for training the classifier
-            train_pos = clustered_pos\
-                .filter(clustered_pos[clusterCol]==i_cluster)\
-                .select(patIDCol)\
-                .join(trainFolds, patIDCol)
+            # # the positive data for training the classifier
+            # train_pos = clustered_pos\
+                # .filter(clustered_pos[clusterCol]==i_cluster)\
+                # .select(patIDCol)\
+                # .join(trainFolds, patIDCol)
             
-            posPctThisClusterVSAllClusters = float(train_pos.count()) / nPosesAllClusters
-            # select negative training data based on the clustering result
-            corresponding_neg = train_pos\
-                .select(matchCol)\
-                .join(org_neg_data, matchCol)
-            corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
-                .select([patIDCol, matchCol] + [clusterFeatureCol])
-            similar_neg_ids = select_certain_pct_ids_per_positive_closest_to_cluster_centre(\
-                corresponding_neg_4_clustering_assembled, 
-                clusterFeatureCol, 
-                cluster_model.clusterCenters()[i_cluster], 
-                posPctThisClusterVSAllClusters, 
-                patIDCol,
-                matchCol
-            )
-            train_data = similar_neg_ids\
-                .join(trainFolds, patIDCol)\
-                .select(train_pos.columns)\
-                .union(train_pos)
+            # posPctThisClusterVSAllClusters = float(train_pos.count()) / nPosesAllClusters
+            # # select negative training data based on the clustering result
+            # corresponding_neg = train_pos\
+                # .select(matchCol)\
+                # .join(org_neg_data, matchCol)
+            # corresponding_neg_4_clustering_assembled = cluster_assembler.transform(corresponding_neg)\
+                # .select([patIDCol, matchCol] + [clusterFeatureCol])
+            # similar_neg_ids = select_certain_pct_ids_per_positive_closest_to_cluster_centre(\
+                # corresponding_neg_4_clustering_assembled, 
+                # clusterFeatureCol, 
+                # cluster_model.clusterCenters()[i_cluster], 
+                # posPctThisClusterVSAllClusters, 
+                # patIDCol,
+                # matchCol
+            # )
+            train_data = trainFolds
+            # train_data = similar_neg_ids\
+                # .join(trainFolds, patIDCol)\
+                # .select(train_pos.columns)\
+                # .union(train_pos)
             
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, n_cv_folds, matchCol, foldCol=cvIDCol)
-            # sanity check: if there are too few negatives for any positive 
-            thresh_n_neg_per_fold = round(train_pos.count() / float(n_cv_folds)) * warn_threshold_np_ratio
-            neg_counts_all_cv_folds = trainDataWithCVFoldID\
-                .filter(F.col(orgOutputCol)==0)\
-                .groupBy(cvIDCol)\
-                .agg(F.count(orgOutputCol).alias("_tmp"))\
-                .select("_tmp")\
-                .collect()
-            if any(map(lambda x: x["_tmp"] < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
-                raise ValueError("Insufficient number of negative data in at least one cv fold.")
+            # # sanity check: if there are too few negatives for any positive 
+            # thresh_n_neg_per_fold = round(train_pos.count() / float(n_cv_folds)) * warn_threshold_np_ratio
+            # neg_counts_all_cv_folds = trainDataWithCVFoldID\
+                # .filter(F.col(orgOutputCol)==0)\
+                # .groupBy(cvIDCol)\
+                # .agg(F.count(orgOutputCol).alias("_tmp"))\
+                # .select("_tmp")\
+                # .collect()
+            # if any(map(lambda x: x["_tmp"] < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
+                # raise ValueError("Insufficient number of negative data in at least one cv fold.")
                 
             
         
@@ -333,16 +334,17 @@ def main(result_dir_master, result_dir_s3):
                 .join(leftoutFold.filter(F.col(orgOutputCol)==1).select(matchCol), matchCol).select(org_pos_data.columns)\
                 .union(org_pos_data.join(leftoutFold.select(patIDCol), patIDCol).select(org_pos_data.columns))\
                 .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol).select(org_pos_data.columns))
-            entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
-                    .select([patIDCol, matchCol] + [clusterFeatureCol])
+            # entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
+                    # .select([patIDCol, matchCol] + [clusterFeatureCol])
             
-            filteredTestData = select_certain_pct_overall_ids_closest_to_cluster_centre(\
-                entireTestDataAssembled4Clustering, 
-                clusterFeatureCol, 
-                cluster_model.clusterCenters()[i_cluster], 
-                posPctThisClusterVSAllClusters, 
-                patIDCol
-            ).join(entireTestData, patIDCol)
+            # filteredTestData = select_certain_pct_overall_ids_closest_to_cluster_centre(\
+                # entireTestDataAssembled4Clustering, 
+                # clusterFeatureCol, 
+                # cluster_model.clusterCenters()[i_cluster], 
+                # posPctThisClusterVSAllClusters, 
+                # patIDCol
+            # ).join(entireTestData, patIDCol)
+            filteredTestData = entireTestData
             
             filteredTestDataAssembled = assembler.transform(filteredTestData)\
                 .select(nonFeatureCols + [collectivePredictorCol])       
@@ -363,7 +365,7 @@ def main(result_dir_master, result_dir_s3):
                 predictionsOneFold = predictionsOneFold.unionAll(predictions)
             else:
                 predictionsOneFold = predictions
-            # predictionsOneFold.cache()
+            predictionsOneFold.cache()
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
@@ -391,6 +393,7 @@ def main(result_dir_master, result_dir_s3):
         else:
             predictionsAllData = predictionsOneFold
         predictionsAllData.cache()
+        predictionsOneFold.unpersist()
             
 
     # # save all predictions
