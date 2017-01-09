@@ -160,7 +160,8 @@ def main(result_dir_master, result_dir_s3):
     if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
     org_pos_data = org_pos_data.withColumn(orgOutputCol, org_pos_data[orgOutputCol].cast("double"))
-    orgPredictorCols = [x for x in org_pos_data.columns if x not in nonFeatureCols]    
+    # orgPredictorCols = [x for x in org_pos_data.columns if x not in nonFeatureCols]    
+    orgPredictorCols = ["PATIENT_AGE", "LOOKBACK_DAYS", "LVL3_CHRN_ISCH_HD_FLAG", "LVL3_ABN_CHST_XRAY_FLAG"]
     orgPredictorCols4Clustering = [x for x in orgPredictorCols if "FLAG" in x]
     if type(org_neg_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
