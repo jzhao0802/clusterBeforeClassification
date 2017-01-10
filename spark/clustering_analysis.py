@@ -6,6 +6,7 @@ from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
 # from pyspark.ml.clustering import KMeans
 import pyspark.sql.functions as F
+import pyspark
 import numpy
 import os
 import sys
@@ -245,6 +246,7 @@ def main(result_dir_master, result_dir_s3):
     # cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
+    # metricSets = [{"metricName": "areaUnderPR"}]
     
 
     for iFold in range(n_eval_folds):
@@ -353,6 +355,7 @@ def main(result_dir_master, result_dir_s3):
             # testing
             
             predictions = cvModel.transform(filteredTestDataAssembled)
+            predictions.persist(pyspark.StorageLevel(True, False, False, False, 1))
             metricValuesOneCluster = evaluator\
                 .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
@@ -362,10 +365,10 @@ def main(result_dir_master, result_dir_s3):
             
 
             if predictionsOneFold is not None:
-                predictionsOneFold = predictionsOneFold.unionAll(predictions)
+                predictionsOneFold = predictionsOneFold.union(predictions)
             else:
                 predictionsOneFold = predictions
-            predictionsOneFold.cache()
+            # predictionsOneFold.cache()
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
@@ -392,20 +395,20 @@ def main(result_dir_master, result_dir_s3):
             predictionsAllData = predictionsAllData.unionAll(predictionsOneFold)
         else:
             predictionsAllData = predictionsOneFold
-        predictionsAllData.cache()
-        predictionsOneFold.unpersist()
+        # predictionsAllData.cache()
+        # predictionsOneFold.unpersist()
             
 
-    # # save all predictions
-    # predictionsFileName = result_dir_s3 + "predictionsAllData"
-    # predictionsAllData.select(orgOutputCol,
-                              # getitem(1)(predictionCol).alias('prob_1'))\
-        # .write.csv(predictionsFileName, header="true")
-    # # metrics of predictions on the entire dataset
-    # metricValues = evaluator\
-        # .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
-    # predictionsAllData.unpersist()
-    # save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
+    # save all predictions
+    predictionsFileName = result_dir_s3 + "predictionsAllData"
+    predictionsAllData.select(orgOutputCol,
+                              getitem(1)(predictionCol).alias('prob_1'))\
+        .write.csv(predictionsFileName, header="true")
+    # metrics of predictions on the entire dataset
+    metricValues = evaluator\
+        .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+    predictionsAllData.unpersist()
+    save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
     
     spark.stop()
 
