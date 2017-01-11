@@ -6,6 +6,7 @@ from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.clustering import KMeans
 import pyspark.sql.functions as F
+import pyspark
 import numpy
 import os
 import sys
@@ -208,10 +209,10 @@ def main(result_dir_master, result_dir_s3):
     assembler = VectorAssembler(inputCols=orgPredictorCols, outputCol=collectivePredictorCol)
     posFeatureAssembledData = assembler.transform(org_pos_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    posFeatureAssembledData.cache()
+    # posFeatureAssembledData.cache()
     negFeatureAssembledData = assembler.transform(org_neg_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    negFeatureAssembledData.cache()
+    # negFeatureAssembledData.cache()
     #
     evalIDCol = "evalFoldID"
     cvIDCol = "cvFoldID"
@@ -351,6 +352,7 @@ def main(result_dir_master, result_dir_s3):
             # testing
             
             predictions = cvModel.transform(filteredTestDataAssembled)
+            predictions.persist(pyspark.StorageLevel(True, False, False, False, 1))
             metricValuesOneCluster = evaluator\
                 .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
@@ -390,19 +392,19 @@ def main(result_dir_master, result_dir_s3):
             predictionsAllData = predictionsAllData.unionAll(predictionsOneFold)
         else:
             predictionsAllData = predictionsOneFold
-        predictionsAllData.cache()
+        # predictionsAllData.cache()
             
 
-    # # save all predictions
-    # predictionsFileName = result_dir_s3 + "predictionsAllData"
-    # predictionsAllData.select(orgOutputCol,
-                              # getitem(1)(predictionCol).alias('prob_1'))\
-        # .write.csv(predictionsFileName, header="true")
-    # # metrics of predictions on the entire dataset
-    # metricValues = evaluator\
-        # .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
-    # predictionsAllData.unpersist()
-    # save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
+    # save all predictions
+    predictionsFileName = result_dir_s3 + "predictionsAllData"
+    predictionsAllData.select(orgOutputCol,
+                              getitem(1)(predictionCol).alias('prob_1'))\
+        .write.csv(predictionsFileName, header="true")
+    # metrics of predictions on the entire dataset
+    metricValues = evaluator\
+        .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+    predictionsAllData.unpersist()
+    save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
     
     spark.stop()
 
