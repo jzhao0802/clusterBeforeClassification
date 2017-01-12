@@ -120,8 +120,8 @@ def main(result_dir_master, result_dir_s3):
     CON_CONFIGS["n_eval_folds"] = 3
     CON_CONFIGS["n_cv_folds"] = 3  
     
-    CON_CONFIGS["grid_n_trees"] = [20, 30]
-    CON_CONFIGS["grid_depth"] = [3]
+    CON_CONFIGS["lambdas"] = [0.1, 1]
+    CON_CONFIGS["alphas"] = [0, 0.5]
         
     # desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
     CON_CONFIGS["desired_recalls"] = [0.05,0.10]
@@ -206,8 +206,8 @@ def main(result_dir_master, result_dir_s3):
     
     
     # the model (pipeline)
-    rf = RandomForestClassifier(featuresCol = collectivePredictorCol,
-                                labelCol = orgOutputCol, seed=CON_CONFIGS["seed"])
+    classifier_spec = LogisticRegression(maxIter=1e5, featuresCol = collectivePredictorCol,
+                            labelCol = orgOutputCol, standardization = True)
     evaluator = BinaryClassificationEvaluatorWithPrecisionAtRecall(\
         rawPredictionCol=predictionCol,
         labelCol=orgOutputCol,
@@ -215,11 +215,9 @@ def main(result_dir_master, result_dir_s3):
         metricParams={"recallValue":0.05}\
     )
     paramGrid = ParamGridBuilder()\
-            .addGrid(rf.numTrees, CON_CONFIGS["grid_n_trees"])\
-            .addGrid(rf.maxDepth, CON_CONFIGS["grid_depth"])\
-            .addGrid(rf.minInstancesPerNode, minInstancesPerNode)\
-            .addGrid(rf.featureSubsetStrategy, featureSubsetStrategy)\
-            .build()
+               .addGrid(lr.regParam, CON_CONFIGS["lambdas"])\
+               .addGrid(lr.elasticNetParam, CON_CONFIGS["alphas"])\
+               .build()
 
     # cross-evaluation
     predictionsAllData = None
