@@ -32,8 +32,8 @@ def run(script, n_executors, n_executor_cores, memory, submit_log):
     
 if __name__ == "__main__":
     main_script_name = "/home/lichao.wang/code/lichao/test/ClusteringBeforeClassification/clustering_analysis.py"
-    main_n_executors = 7
-    main_n_executor_cores = 16
-    main_executor_memory = 16
+    main_n_executors = 20
+    main_n_executor_cores = 5
+    main_executor_memory = 8
     main_submit_log_file = "./submit_log.txt"
     run(main_script_name, main_n_executors, main_n_executor_cores, main_executor_memory, main_submit_log_file)
