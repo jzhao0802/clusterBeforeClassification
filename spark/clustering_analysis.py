@@ -298,7 +298,7 @@ def main(result_dir_master, result_dir_s3):
             
 
             validator = CrossValidatorWithStratificationID(\
-                            estimator=rf,
+                            estimator=classifier_spec,
                             estimatorParamMaps=paramGrid,
                             evaluator=evaluator,
                             stratifyCol=cvIDCol\
