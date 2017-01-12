@@ -21,9 +21,9 @@ def getitem(i):
         return v.array.item(i)
     return udf(getitem_, DoubleType())
 
-def save_analysis_info(path, file_name, **kwargs):
+def save_analysis_info(path, file_name, configs):
     with open(path + file_name, "w") as file:
-        for key, value in kwargs.iteritems():         
+        for key, value in configs.items():         
             file.write(key + ": " + str(value) + "\n")
         os.chmod(path + file_name, 0o777)
 
@@ -104,22 +104,27 @@ def save_metrics(file_name, dfMetrics):
     os.chmod(file_name, 0o777)
         
 def main(result_dir_master, result_dir_s3):
+    
+    CON_CONFIGS = {}
+    CON_CONFIGS["result_dir_master"] = result_dir_master
+    CON_CONFIGS["result_dir_s3"] = result_dir_s3
+
     #
     ## user to specify: hyper-params
     
     # clustering
-    n_clusters = 3
-    warn_threshold_np_ratio = 5
+    CON_CONFIGS["n_clusters"] = 3
+    CON_CONFIGS["warn_threshold_np_ratio"] = 5
     
     # classification
-    n_eval_folds = 3
-    n_cv_folds = 3  
+    CON_CONFIGS["n_eval_folds"] = 3
+    CON_CONFIGS["n_cv_folds"] = 3  
     
-    grid_n_trees = [20, 30]
-    grid_depth = [3]
+    CON_CONFIGS["grid_n_trees"] = [20, 30]
+    CON_CONFIGS["grid_depth"] = [3]
         
     # desired_recalls = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-    desired_recalls = [0.05,0.10]
+    CON_CONFIGS["desired_recalls"] = [0.05,0.10]
     
     
     
@@ -128,23 +133,23 @@ def main(result_dir_master, result_dir_s3):
     
     
     # user to specify : seed in Random Forest model
-    seed = 42
-    data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    pos_file = "pos_1.0pct.csv"
-    neg_file = "neg_1.0pct.csv"
-    ss_file = "ss_1.0pct.csv"
+    CON_CONFIGS["seed"] = 42
+    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    CON_CONFIGS["pos_file"] = "pos_1.0pct.csv"
+    CON_CONFIGS["neg_file"] = "neg_1.0pct.csv"
+    CON_CONFIGS["ss_file"] = "ss_1.0pct.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
         .option("inferSchema", "true")\
-        .csv(data_path + pos_file)
+        .csv(CON_CONFIGS["data_path"] + CON_CONFIGS["pos_file"])
     org_neg_data = spark.read.option("header", "true")\
         .option("inferSchema", "true")\
-        .csv(data_path + neg_file)\
+        .csv(CON_CONFIGS["data_path"] + CON_CONFIGS["neg_file"])\
         .select(org_pos_data.columns)
     org_ss_data = spark.read.option("header", "true")\
         .option("inferSchema", "true")\
-        .csv(data_path +ss_file)\
+        .csv(CON_CONFIGS["data_path"] +CON_CONFIGS["ss_file"])\
         .select(org_pos_data.columns)
     
     
@@ -178,20 +183,7 @@ def main(result_dir_master, result_dir_s3):
     save_analysis_info(\
         result_dir_master, 
         "analysis_info.txt", 
-        n_eval_folds=n_eval_folds,
-        n_cv_folds=n_cv_folds,
-        grid_n_trees=grid_n_trees,
-        grid_depth=grid_depth,
-        desired_recalls=desired_recalls,
-        seed=seed,
-        data_path=data_path,
-        pos_file=pos_file,
-        neg_file=neg_file,
-        ss_file=ss_file,
-        result_dir_s3=result_dir_s3,
-        result_dir_master=result_dir_master,
-        n_clusters = n_clusters,
-        warn_threshold_np_ratio = warn_threshold_np_ratio
+        CON_CONFIGS
         )
     
     
@@ -210,12 +202,12 @@ def main(result_dir_master, result_dir_s3):
     evalIDCol = "evalFoldID"
     cvIDCol = "cvFoldID"
     pos_neg_data = posFeatureAssembledData.union(negFeatureAssembledData)
-    pos_neg_data_with_eval_ids = AppendDataMatchingFoldIDs(pos_neg_data, n_eval_folds, matchCol, foldCol=evalIDCol)
+    pos_neg_data_with_eval_ids = AppendDataMatchingFoldIDs(pos_neg_data, CON_CONFIGS["n_eval_folds"], matchCol, foldCol=evalIDCol)
     
     
     # the model (pipeline)
     rf = RandomForestClassifier(featuresCol = collectivePredictorCol,
-                                labelCol = orgOutputCol, seed=seed)
+                                labelCol = orgOutputCol, seed=CON_CONFIGS["seed"])
     evaluator = BinaryClassificationEvaluatorWithPrecisionAtRecall(\
         rawPredictionCol=predictionCol,
         labelCol=orgOutputCol,
@@ -223,8 +215,8 @@ def main(result_dir_master, result_dir_s3):
         metricParams={"recallValue":0.05}\
     )
     paramGrid = ParamGridBuilder()\
-            .addGrid(rf.numTrees, grid_n_trees)\
-            .addGrid(rf.maxDepth, grid_depth)\
+            .addGrid(rf.numTrees, CON_CONFIGS["grid_n_trees"])\
+            .addGrid(rf.maxDepth, CON_CONFIGS["grid_depth"])\
             .addGrid(rf.minInstancesPerNode, minInstancesPerNode)\
             .addGrid(rf.featureSubsetStrategy, featureSubsetStrategy)\
             .build()
@@ -232,13 +224,13 @@ def main(result_dir_master, result_dir_s3):
     # cross-evaluation
     predictionsAllData = None
     
-    kmeans = KMeans(featuresCol=clusterFeatureCol, predictionCol=clusterCol).setK(n_clusters)
+    kmeans = KMeans(featuresCol=clusterFeatureCol, predictionCol=clusterCol).setK(CON_CONFIGS["n_clusters"])
     cluster_assembler = VectorAssembler(inputCols=orgPredictorCols4Clustering, outputCol=clusterFeatureCol)
     
-    metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in desired_recalls]
+    metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in CON_CONFIGS["desired_recalls"]]
     
 
-    for iFold in range(n_eval_folds):
+    for iFold in range(CON_CONFIGS["n_eval_folds"]):
         
         
         condition = pos_neg_data_with_eval_ids[evalIDCol] == iFold
@@ -260,7 +252,7 @@ def main(result_dir_master, result_dir_s3):
         nPosesAllClusters = clustered_pos.count()
         predictionsOneFold = None
         
-        for i_cluster in range(n_clusters):
+        for i_cluster in range(CON_CONFIGS["n_clusters"]):
             
             # the positive data for training the classifier
             train_pos = clustered_pos\
@@ -288,9 +280,9 @@ def main(result_dir_master, result_dir_s3):
                 .select(train_pos.columns)\
                 .union(train_pos)
             
-            trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, n_cv_folds, matchCol, foldCol=cvIDCol)
+            trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, CON_CONFIGS["n_cv_folds"], matchCol, foldCol=cvIDCol)
             # sanity check: if there are too few negatives for any positive 
-            thresh_n_neg_per_fold = round(train_pos.count() / float(n_cv_folds)) * warn_threshold_np_ratio
+            thresh_n_neg_per_fold = round(train_pos.count() / float(CON_CONFIGS["n_cv_folds"])) * CON_CONFIGS["warn_threshold_np_ratio"]
             neg_counts_all_cv_folds = trainDataWithCVFoldID\
                 .filter(F.col(orgOutputCol)==0)\
                 .groupBy(cvIDCol)\
