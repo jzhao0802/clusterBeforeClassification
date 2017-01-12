@@ -114,7 +114,7 @@ def main(result_dir_master, result_dir_s3):
     
     # clustering
     CON_CONFIGS["n_clusters"] = 3
-    CON_CONFIGS["warn_threshold_np_ratio"] = 5
+    CON_CONFIGS["warn_threshold_np_ratio"] = 1
     
     # classification
     CON_CONFIGS["n_eval_folds"] = 3
@@ -134,10 +134,10 @@ def main(result_dir_master, result_dir_s3):
     
     # user to specify : seed in Random Forest model
     CON_CONFIGS["seed"] = 42
-    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/smaller_different_pn_proportion_data"
     CON_CONFIGS["pos_file"] = "pos_1.0pct.csv"
-    CON_CONFIGS["neg_file"] = "neg_1.0pct.csv"
-    CON_CONFIGS["ss_file"] = "ss_1.0pct.csv"
+    CON_CONFIGS["neg_file"] = "neg_1.0pct_ratio_5.csv"
+    CON_CONFIGS["ss_file"] = "ss_1.0pct_ratio_10.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
@@ -158,6 +158,10 @@ def main(result_dir_master, result_dir_s3):
     matchCol = "matched_positive_id"
     patIDCol = "patid"
     nonFeatureCols = [matchCol, orgOutputCol, patIDCol]
+    orgPredictorCols = ["PATIENT_AGE", "LOOKBACK_DAYS", "LVL3_CHRN_ISCH_HD_FLAG", "LVL3_ABN_CHST_XRAY_FLAG"]
+    org_pos_data = org_pos_data.select(nonFeatureCols + orgPredictorCols)
+    org_neg_data = org_neg_data.select(nonFeatureCols + orgPredictorCols)
+    org_ss_data = org_ss_data.select(nonFeatureCols + orgPredictorCols)
     # sanity check 
     if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
