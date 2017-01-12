@@ -47,13 +47,14 @@ def compute_and_append_in_cluster_dist(row, featureCol, clusterCol, centres, dis
     return compute_and_append_dist_to_numpy_array_point(row, featureCol, centre, distCol)
         
 def clustering(data_4_clustering_assembled, clustering_obj, clusterFeatureCol, clusterCol, distCol): 
+    data_4_clustering_assembled.cache()
     cluster_model = clustering_obj.fit(data_4_clustering_assembled)
     cluster_result = cluster_model.transform(data_4_clustering_assembled)
     centres = cluster_model.clusterCenters()
     result_with_dist = cluster_result.rdd\
         .map(lambda x: compute_and_append_in_cluster_dist(x, clusterFeatureCol, clusterCol, centres, distCol))\
         .toDF()
-        
+    data_4_clustering_assembled.unpersist()
     return (cluster_model, result_with_dist)
 
 def append_id(elem, new_elem_name):
@@ -283,16 +284,17 @@ def main(result_dir_master, result_dir_s3):
                 .union(train_pos)
             
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, CON_CONFIGS["n_cv_folds"], matchCol, foldCol=cvIDCol)
+            trainDataWithCVFoldID.coalesce(int(trainFolds.rdd.getNumPartitions() * posPctThisClusterVSAllClusters) + 1)
             # sanity check: if there are too few negatives for any positive 
-            thresh_n_neg_per_fold = round(train_pos.count() / float(CON_CONFIGS["n_cv_folds"])) * CON_CONFIGS["warn_threshold_np_ratio"]
-            neg_counts_all_cv_folds = trainDataWithCVFoldID\
-                .filter(F.col(orgOutputCol)==0)\
-                .groupBy(cvIDCol)\
-                .agg(F.count(orgOutputCol).alias("_tmp"))\
-                .select("_tmp")\
-                .collect()
-            if any(map(lambda x: x["_tmp"] < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
-                raise ValueError("Insufficient number of negative data in at least one cv fold.")
+            # thresh_n_neg_per_fold = round(train_pos.count() / float(CON_CONFIGS["n_cv_folds"])) * CON_CONFIGS["warn_threshold_np_ratio"]
+            # neg_counts_all_cv_folds = trainDataWithCVFoldID\
+                # .filter(F.col(orgOutputCol)==0)\
+                # .groupBy(cvIDCol)\
+                # .agg(F.count(orgOutputCol).alias("_tmp"))\
+                # .select("_tmp")\
+                # .collect()
+            # if any(map(lambda x: x["_tmp"] < thresh_n_neg_per_fold, neg_counts_all_cv_folds)):
+                # raise ValueError("Insufficient number of negative data in at least one cv fold.")
                 
             
         
@@ -332,7 +334,6 @@ def main(result_dir_master, result_dir_s3):
             filteredTestDataAssembled = assembler.transform(filteredTestData)\
                 .select(nonFeatureCols + [collectivePredictorCol])       
             
-            
             # testing
             
             predictions = cvModel.transform(filteredTestDataAssembled)
@@ -341,7 +342,7 @@ def main(result_dir_master, result_dir_s3):
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
             save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
             predictions.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
-            
+            predictions.persist(pyspark.StorageLevel(True, False, False, False, 1))
 
             if predictionsOneFold is not None:
                 predictionsOneFold = predictionsOneFold.union(predictions)

@@ -115,8 +115,6 @@ def _binary_clf_curve(labelAndVectorisedScores, rawPredictionCol, labelCol):
     df_with_fps = dup_removed_scores_labels \
         .withColumn("fps", 1 + F.col("max_index") - F.col("tps"))
         
-    sortedScoresAndLabelsCumSum.unpersist()
-    
     return df_with_fps
 
 def getPrecisionAtOneRecallFromPRCurve(curve, recall):
