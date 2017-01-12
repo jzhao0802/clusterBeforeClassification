@@ -232,6 +232,7 @@ def main(result_dir_master, result_dir_s3):
     
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in CON_CONFIGS["desired_recalls"]]
     
+    predictions_all_folds_dict = {}
 
     for iFold in range(CON_CONFIGS["n_eval_folds"]):
         
@@ -254,6 +255,7 @@ def main(result_dir_master, result_dir_s3):
         
         nPosesAllClusters = clustered_pos.count()
         predictionsOneFold = None
+        predictions_one_fold_dict = {}
         
         for i_cluster in range(CON_CONFIGS["n_clusters"]):
             
@@ -344,10 +346,11 @@ def main(result_dir_master, result_dir_s3):
             predictions.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
             predictions.persist(pyspark.StorageLevel(True, False, False, False, 1))
 
-            if predictionsOneFold is not None:
-                predictionsOneFold = predictionsOneFold.union(predictions)
-            else:
-                predictionsOneFold = predictions
+            # if predictionsOneFold is not None:
+                # predictionsOneFold = predictionsOneFold.union(predictions)
+            # else:
+                # predictionsOneFold = predictions
+            predictions_one_fold_dict["cluster " + str(i_cluster)] = predictions
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
@@ -364,26 +367,39 @@ def main(result_dir_master, result_dir_s3):
             
         
         # summarise all clusters from the fold
-        
+        predictions_one_fold_df = None
+        for i_cluster in range(CON_CONFIGS["n_clusters"]):
+            if predictions_one_fold_df is not None:
+                predictions_one_fold_df = predictions_one_fold_df.union(predictions_one_fold_dict["cluster " + str(i_cluster)])
+            else:
+                predictions_one_fold_df = predictions
         metricValuesOneFold = evaluator\
-            .evaluateWithSeveralMetrics(predictionsOneFold, metricSets = metricSets)            
+            .evaluateWithSeveralMetrics(predictions_one_fold_df, metricSets = metricSets)            
         file_name_metrics_one_fold = result_dir_master + "metrics_fold_" + str(iFold) + "_.csv"
         save_metrics(file_name_metrics_one_fold, metricValuesOneFold)
         
-        if predictionsAllData is not None:
-            predictionsAllData = predictionsAllData.union(predictionsOneFold)
-        else:
-            predictionsAllData = predictionsOneFold
+        predictions_all_folds_dict["fold " + str(i_fold)] = predictions_one_fold_dict
+        # if predictionsAllData is not None:
+            # predictionsAllData = predictionsAllData.union(predictionsOneFold)
+        # else:
+            # predictionsAllData = predictionsOneFold
             
 
     # save all predictions
     predictionsFileName = result_dir_s3 + "predictionsAllData"
-    predictionsAllData.select(orgOutputCol,
+    predictions_all_folds_df = None
+    for iFold in range(CON_CONFIGS["n_eval_folds"]): 
+        for i_cluster in range(CON_CONFIGS["n_clusters"]): 
+            if predictions_all_folds_df is not None:
+                predictions_all_folds_df = predictions_all_folds_df.union(predictions_one_fold_dict["cluster " + str(i_cluster)])
+            else:
+                predictions_all_folds_df = predictions
+    predictions_all_folds_df.select(orgOutputCol,
                               getitem(1)(predictionCol).alias('prob_1'))\
         .write.csv(predictionsFileName, header="true")
     # metrics of predictions on the entire dataset
     metricValues = evaluator\
-        .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
+        .evaluateWithSeveralMetrics(predictions_all_folds_df, metricSets = metricSets)
     save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
     
     spark.stop()
