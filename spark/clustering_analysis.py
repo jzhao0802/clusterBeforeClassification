@@ -3,7 +3,7 @@ from pyspark.sql.types import StructType, StructField, DoubleType, IntegerType, 
 from pyspark.sql.functions import udf
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.tuning import ParamGridBuilder
-from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.classification import RandomForestClassifier, LogisticRegression
 from pyspark.ml.clustering import KMeans
 import pyspark.sql.functions as F
 import pyspark
@@ -134,7 +134,7 @@ def main(result_dir_master, result_dir_s3):
     
     # user to specify : seed in Random Forest model
     CON_CONFIGS["seed"] = 42
-    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/smaller_different_pn_proportion_data"
+    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_different_pn_proportion_data/"
     CON_CONFIGS["pos_file"] = "pos_1.0pct.csv"
     CON_CONFIGS["neg_file"] = "neg_1.0pct_ratio_5.csv"
     CON_CONFIGS["ss_file"] = "ss_1.0pct_ratio_10.csv"
@@ -219,8 +219,8 @@ def main(result_dir_master, result_dir_s3):
         metricParams={"recallValue":0.05}\
     )
     paramGrid = ParamGridBuilder()\
-               .addGrid(lr.regParam, CON_CONFIGS["lambdas"])\
-               .addGrid(lr.elasticNetParam, CON_CONFIGS["alphas"])\
+               .addGrid(classifier_spec.regParam, CON_CONFIGS["lambdas"])\
+               .addGrid(classifier_spec.elasticNetParam, CON_CONFIGS["alphas"])\
                .build()
 
     # cross-evaluation
