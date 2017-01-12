@@ -204,18 +204,13 @@ def main(result_dir_master, result_dir_s3):
     assembler = VectorAssembler(inputCols=orgPredictorCols, outputCol=collectivePredictorCol)
     posFeatureAssembledData = assembler.transform(org_pos_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    # posFeatureAssembledData.cache()
     negFeatureAssembledData = assembler.transform(org_neg_data)\
         .select(nonFeatureCols + [collectivePredictorCol])
-    # negFeatureAssembledData.cache()
     #
     evalIDCol = "evalFoldID"
     cvIDCol = "cvFoldID"
     pos_neg_data = posFeatureAssembledData.union(negFeatureAssembledData)
     pos_neg_data_with_eval_ids = AppendDataMatchingFoldIDs(pos_neg_data, n_eval_folds, matchCol, foldCol=evalIDCol)
-    
-    
-    # ssFeatureAssembledData.cache()
     
     
     # the model (pipeline)
@@ -247,7 +242,7 @@ def main(result_dir_master, result_dir_s3):
         
         
         condition = pos_neg_data_with_eval_ids[evalIDCol] == iFold
-        leftoutFold = pos_neg_data_with_eval_ids.filter(condition)
+        leftoutFold = pos_neg_data_with_eval_ids.filter(condition).drop(evalIDCol)
         trainFolds = pos_neg_data_with_eval_ids.filter(~condition).drop(evalIDCol)
         
         #
@@ -255,8 +250,8 @@ def main(result_dir_master, result_dir_s3):
         
         pos_data_4_clustering = trainFolds\
             .filter(F.col(orgOutputCol)==1)\
-            .select(matchCol)\
-            .join(org_pos_data, matchCol)
+            .select(patIDCol)\
+            .join(org_pos_data, patIDCol)
         pos_data_4_clustering_assembled = cluster_assembler.transform(pos_data_4_clustering)\
             .select([patIDCol, matchCol] + [clusterFeatureCol])
         cluster_model, clustered_pos = clustering(pos_data_4_clustering_assembled, kmeans, 
@@ -347,7 +342,6 @@ def main(result_dir_master, result_dir_s3):
             # testing
             
             predictions = cvModel.transform(filteredTestDataAssembled)
-            predictions.persist(pyspark.StorageLevel(True, False, False, False, 1))
             metricValuesOneCluster = evaluator\
                 .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
@@ -356,10 +350,9 @@ def main(result_dir_master, result_dir_s3):
             
 
             if predictionsOneFold is not None:
-                predictionsOneFold = predictionsOneFold.unionAll(predictions)
+                predictionsOneFold = predictionsOneFold.union(predictions)
             else:
                 predictionsOneFold = predictions
-            # predictionsOneFold.cache()
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
@@ -383,10 +376,9 @@ def main(result_dir_master, result_dir_s3):
         save_metrics(file_name_metrics_one_fold, metricValuesOneFold)
         
         if predictionsAllData is not None:
-            predictionsAllData = predictionsAllData.unionAll(predictionsOneFold)
+            predictionsAllData = predictionsAllData.union(predictionsOneFold)
         else:
             predictionsAllData = predictionsOneFold
-        # predictionsAllData.cache()
             
 
     # save all predictions
@@ -397,7 +389,6 @@ def main(result_dir_master, result_dir_s3):
     # metrics of predictions on the entire dataset
     metricValues = evaluator\
         .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
-    predictionsAllData.unpersist()
     save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
     
     spark.stop()
