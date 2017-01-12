@@ -129,10 +129,6 @@ def main(result_dir_master, result_dir_s3):
     
     # user to specify : seed in Random Forest model
     seed = 42
-    # data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    # pos_file = "pos_70.0pct.csv"
-    # neg_file = "neg_70.0pct.csv"
-    # ss_file = "ss_70.0pct.csv"
     data_path = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
     pos_file = "pos_1.0pct.csv"
     neg_file = "neg_1.0pct.csv"
@@ -178,7 +174,7 @@ def main(result_dir_master, result_dir_s3):
     distCol = "dist"
     # user to specify: the column name for prediction
     predictionCol = "probability"
-    
+
     
     save_analysis_info(\
         result_dir_master, 
@@ -220,8 +216,7 @@ def main(result_dir_master, result_dir_s3):
     pos_neg_data_with_eval_ids = AppendDataMatchingFoldIDs(pos_neg_data, n_eval_folds, matchCol, foldCol=evalIDCol)
     
     
-    # ssFeatureAssembledData = assembler.transform(org_ss_data)\
-        # .select(nonFeatureCols + [collectivePredictorCol])
+
     # ssFeatureAssembledData.cache()
     
     
@@ -237,6 +232,8 @@ def main(result_dir_master, result_dir_s3):
     paramGrid = ParamGridBuilder()\
             .addGrid(rf.numTrees, grid_n_trees)\
             .addGrid(rf.maxDepth, grid_depth)\
+            .addGrid(rf.minInstancesPerNode, minInstancesPerNode)\
+            .addGrid(rf.featureSubsetStrategy, featureSubsetStrategy)\
             .build()
 
     # cross-evaluation
@@ -312,6 +309,7 @@ def main(result_dir_master, result_dir_s3):
                 
             
         
+
         
             #
             ## train the classifier     
@@ -359,7 +357,7 @@ def main(result_dir_master, result_dir_s3):
             save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
             predictions.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
             
-            
+
 
             if predictionsOneFold is not None:
                 predictionsOneFold = predictionsOneFold.unionAll(predictions)
