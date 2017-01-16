@@ -187,6 +187,10 @@ def main(result_dir_master, result_dir_s3):
     
     CON_CONFIGS["orgPredictorCols"] = orgPredictorCols
     CON_CONFIGS["orgPredictorCols4Clustering"] = orgPredictorCols4Clustering
+    CON_CONFIGS["n_predictors_classification"] = len(orgPredictorCols)
+    CON_CONFIGS["n_rows_pos"] = org_pos_data.count()
+    CON_CONFIGS["n_rows_neg"] = org_neg_data.count()
+    CON_CONFIGS["n_rows_ss"] = org_ss_data.count()
     save_analysis_info(\
         result_dir_master, 
         "analysis_info.txt", 
