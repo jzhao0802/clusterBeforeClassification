@@ -232,6 +232,9 @@ def main(result_dir_master, result_dir_s3):
     
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in CON_CONFIGS["desired_recalls"]]
     
+    inputTrivialNegPredCols = ["_pos_prob", "_neg_prob"]
+    trivial_neg_pred_assembler = VectorAssembler(inputCols=inputTrivialNegPredCols, outputCol=predictionCol)
+    
 
     for iFold in range(CON_CONFIGS["n_eval_folds"]):
         
@@ -337,17 +340,40 @@ def main(result_dir_master, result_dir_s3):
             # testing
             
             predictions = cvModel.transform(filteredTestDataAssembled)
+            
+            # need to union the test data filtered away (all classified as negative)
+            
+            discarded_test_ids = entireTestData\
+                .select(patIDCol)\
+                .subtract(filteredTestData.select(patIDCol))
+            discardedTestData = discarded_test_ids\
+                .join(entireTestData, patIDCol)
+            discardedTestDataAssembled = assembler.transform(discardedTestData, )\
+                .select(nonFeatureCols + [collectivePredictorCol])
+            predictionsDiscardedTestData = discardedTestDataAssembled\
+                .withColumn(inputTrivialNegPredCols[0], F.lit(0.0))\
+                .withColumn(inputTrivialNegPredCols[1], F.lit(1.0))
+            predictionsDiscardedTestDataAssembled = trivial_neg_pred_assembler\
+                .transform(predictionsDiscardedTestData)\
+                .select(predictions.columns)
+            
+            predictionsEntireTestData = predictions.union(predictionsDiscardedTestDataAssembled)
+            
+            
+            
+            
+            
             metricValuesOneCluster = evaluator\
-                .evaluateWithSeveralMetrics(predictions, metricSets = metricSets)            
+                .evaluateWithSeveralMetrics(predictionsEntireTestData, metricSets = metricSets)            
             file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
             save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
-            predictions.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
-            predictions.persist(pyspark.StorageLevel(True, False, False, False, 1))
+            predictionsEntireTestData.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
+            predictionsEntireTestData.persist(pyspark.StorageLevel(True, False, False, False, 1))
 
             if predictionsOneFold is not None:
-                predictionsOneFold = predictionsOneFold.union(predictions)
+                predictionsOneFold = predictionsOneFold.union(predictionsEntireTestData)
             else:
-                predictionsOneFold = predictions
+                predictionsOneFold = predictionsEntireTestData
             
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
