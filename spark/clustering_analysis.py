@@ -238,6 +238,8 @@ def main(result_dir_master, result_dir_s3):
     
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in CON_CONFIGS["desired_recalls"]]
     
+    filename_loop_info = result_dir_master + "loop_info.txt"
+    file_loop_info = open(filename_loop_info, "w")    
 
     for iFold in range(CON_CONFIGS["n_eval_folds"]):
         
@@ -245,6 +247,11 @@ def main(result_dir_master, result_dir_s3):
         condition = pos_neg_data_with_eval_ids[evalIDCol] == iFold
         leftoutFold = pos_neg_data_with_eval_ids.filter(condition).drop(evalIDCol)
         trainFolds = pos_neg_data_with_eval_ids.filter(~condition).drop(evalIDCol)
+        
+        file_loop_info.write("####################################################################\n\n".format(iFold))
+        file_loop_info.write("iFold: {}\n\n".format(iFold))
+        file_loop_info.write("n_rows of leftoutFold: {}\n".format(leftoutFold.count()))
+        file_loop_info.write("n_rows of trainFolds: {}\n".format(trainFolds.count()))        
         
         #
         ## clustering to be done here
@@ -261,7 +268,11 @@ def main(result_dir_master, result_dir_s3):
         nPosesAllClusters = clustered_pos.count()
         predictionsOneFold = None
         
+        file_loop_info.write("nPosesAllClusters: {}\n".format(nPosesAllClusters))
+        
         for i_cluster in range(CON_CONFIGS["n_clusters"]):
+        
+            file_loop_info.write("i_cluster: {}\n\n".format(i_cluster))
             
             # the positive data for training the classifier
             train_pos = clustered_pos\
@@ -269,7 +280,9 @@ def main(result_dir_master, result_dir_s3):
                 .select(patIDCol)\
                 .join(trainFolds, patIDCol)
             
+            file_loop_info.write("n_rows of train_pos: {}\n".format(train_pos.count()))
             posPctThisClusterVSAllClusters = float(train_pos.count()) / nPosesAllClusters
+            file_loop_info.write("posPctThisClusterVSAllClusters: {}\n".format(posPctThisClusterVSAllClusters))
             # select negative training data based on the clustering result
             corresponding_neg = train_pos\
                 .select(matchCol)\
@@ -288,6 +301,7 @@ def main(result_dir_master, result_dir_s3):
                 .join(trainFolds, patIDCol)\
                 .select(train_pos.columns)\
                 .union(train_pos)
+            file_loop_info.write("n_rows of train_data: {}\n".format(train_data.count()))
             
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, CON_CONFIGS["n_cv_folds"], matchCol, foldCol=cvIDCol)
             trainDataWithCVFoldID.coalesce(int(trainFolds.rdd.getNumPartitions() * posPctThisClusterVSAllClusters) + 1)
@@ -328,6 +342,7 @@ def main(result_dir_master, result_dir_s3):
                 .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol).select(org_pos_data.columns))
             entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
                     .select([patIDCol, matchCol] + [clusterFeatureCol])
+            file_loop_info.write("n_rows of entireTestData: {}\n".format(entireTestData.count()))
             
             filteredTestData = select_certain_pct_overall_ids_closest_to_cluster_centre(\
                 entireTestDataAssembled4Clustering, 
@@ -336,6 +351,8 @@ def main(result_dir_master, result_dir_s3):
                 posPctThisClusterVSAllClusters, 
                 patIDCol
             ).join(entireTestData, patIDCol)
+            
+            file_loop_info.write("n_rows of filteredTestData: {}\n".format(filteredTestData.count()))
             
             filteredTestDataAssembled = assembler.transform(filteredTestData)\
                 .select(nonFeatureCols + [collectivePredictorCol])       
@@ -391,6 +408,9 @@ def main(result_dir_master, result_dir_s3):
     metricValues = evaluator\
         .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
     save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
+    
+    file_loop_info.close()
+    os.chmod(file_loop_info, 0o777)
     
     spark.stop()
 
