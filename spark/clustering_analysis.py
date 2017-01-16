@@ -122,7 +122,7 @@ def main(result_dir_master, result_dir_s3):
     CON_CONFIGS["n_cv_folds"] = 3  
     
     CON_CONFIGS["lambdas"] = [0.1, 1]
-    CON_CONFIGS["alphas"] = [0, 0.5]
+    CON_CONFIGS["alphas"] = [0]
         
     # CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
     CON_CONFIGS["desired_recalls"] = [0.05,0.10]
@@ -362,7 +362,9 @@ def main(result_dir_master, result_dir_s3):
             
             # testing
             
-            predictions = cvModel.transform(filteredTestDataAssembled)
+            predictions = cvModel\
+                .transform(filteredTestDataAssembled)\
+                .select(nonFeatureCols + [collectivePredictorCol, predictionCol])
             
             # need to union the test data filtered away (all classified as negative)
             

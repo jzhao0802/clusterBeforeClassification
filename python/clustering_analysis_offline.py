@@ -57,18 +57,11 @@ def select_certain_pct_ids_per_positive_closest_to_cluster_centre(data,
     )
 
     result = data_with_dist\
-        .groupby(pat_id_col)\
-        .apply(pandas.DataFrame.sort, dist_col)
+        .groupby(match_col)\
+        .apply(lambda x: pandas.DataFrame.sort(x.loc[:, dist_col]).iloc[0:(num_to_retain + 1), :])\
+        .loc[:, pat_id_col]
 
-    dist_df = assembled_data_4_clustering.rdd\
-        .map(lambda x: compute_and_append_dist_to_numpy_array_point(x, clusterFeatureCol, centre, distCol))\
-        .toDF()
-    dist_df.registerTempTable("dist_table")
-    ids = assembled_data_4_clustering.sql_ctx.sql(\
-        "SELECT " + idCol + " FROM (SELECT *, row_number() OVER(PARTITION BY " + matchCol + " ORDER BY " + distCol + ") AS tmp_rank FROM dist_table) WHERE tmp_rank <=" + str(num_to_retain)
-    )
-
-    SparkSession.builder.getOrCreate().catalog.dropTempView("dist_table")
+    return result
 
 
 def main(result_dir):
@@ -188,7 +181,7 @@ def main(result_dir):
                 .merge(train_folds, pat_id_col)
             pos_pct_this_cluster_vs_all_clusters = float(train_pos.count()) / n_poses_all_clusters
             corresponding_neg = train_pos.loc[:, match_col].merge(org_neg_data, match_col)
-            similar_neg_ids = select_certain_pct_ids_per_positive_closest_to_cluster_centre(\
+            similar_neg_ids = select_certain_pct_ids_per_positive_closest_to_cluster_centre(
                 corresponding_neg,
                 org_predictor_cols_clustering,
                 kmeans.cluster_centers_[i_cluster, :],
@@ -196,10 +189,10 @@ def main(result_dir):
                 pat_id_col,
                 match_col
             )
-            train_data = similar_neg_ids\
-                .join(trainFolds, patIDCol)\
-                .select(train_pos.columns)\
-                .union(train_pos)
+            train_data = pandas.concat(
+                [train_pos, similar_neg_ids.merge(train_folds, pat_id_col).loc[:, train_pos.columns]],
+                axis=0
+            )
 
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, CON_CONFIGS["n_cv_folds"], matchCol, foldCol=cvIDCol)
             trainDataWithCVFoldID.coalesce(int(trainFolds.rdd.getNumPartitions() * posPctThisClusterVSAllClusters) + 1)
@@ -248,6 +241,40 @@ def main(result_dir):
                 predictionsOneFold = predictionsOneFold.union(predictions)
             else:
                 predictionsOneFold = predictions
+
+            # need to union the test data filtered away (all classified as negative)
+
+            discarded_test_ids = entireTestData\
+                .select(patIDCol)\
+                .subtract(filteredTestData.select(patIDCol))
+            discardedTestData = discarded_test_ids\
+                .join(entireTestData, patIDCol)
+            discardedTestDataAssembled = assembler.transform(discardedTestData, )\
+                .select(nonFeatureCols + [collectivePredictorCol])
+            predictionsDiscardedTestData = discardedTestDataAssembled\
+                .withColumn(inputTrivialNegPredCols[0], F.lit(0.0))\
+                .withColumn(inputTrivialNegPredCols[1], F.lit(1.0))
+            predictionsDiscardedTestDataAssembled = trivial_neg_pred_assembler\
+                .transform(predictionsDiscardedTestData)\
+                .select(predictions.columns)
+
+            predictionsEntireTestData = predictions.union(predictionsDiscardedTestDataAssembled)
+
+
+
+
+
+            metricValuesOneCluster = evaluator\
+                .evaluateWithSeveralMetrics(predictionsEntireTestData, metricSets = metricSets)
+            file_name_metrics_one_cluster = result_dir_master + "metrics_cluster_" + str(i_cluster) + "fold_" + str(iFold) + "_.csv"
+            save_metrics(file_name_metrics_one_cluster, metricValuesOneCluster)
+            predictionsEntireTestData.write.csv(result_dir_s3 + "predictions_fold_" + str(iFold) + "_cluster_" + str(i_cluster) + ".csv")
+            predictionsEntireTestData.persist(pyspark.StorageLevel(True, False, False, False, 1))
+
+            if predictionsOneFold is not None:
+                predictionsOneFold = predictionsOneFold.union(predictionsEntireTestData)
+            else:
+                predictionsOneFold = predictionsEntireTestData
 
             # save the metrics for all hyper-parameter sets in cv
             cvMetrics = cvModel.avgMetrics
