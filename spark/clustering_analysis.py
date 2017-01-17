@@ -47,14 +47,14 @@ def main(result_dir_master, result_dir_s3):
     ## user to specify: hyper-params
     
     # classification
-    CON_CONFIGS["n_eval_folds"] = 3
-    CON_CONFIGS["n_cv_folds"] = 3
+    CON_CONFIGS["n_eval_folds"] = 5
+    CON_CONFIGS["n_cv_folds"] = 5  
     
-    CON_CONFIGS["lambdas"] = [0.1, 1]
-    CON_CONFIGS["alphas"] = [0]
+    CON_CONFIGS["lambdas"] = list(10.0 ** numpy.arange(-2, 2, 1.0))
+    CON_CONFIGS["alphas"] = list(numpy.linspace(0, 1, 3))
         
-    # CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-    CON_CONFIGS["desired_recalls"] = [0.05,0.10]
+    CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
+    # CON_CONFIGS["desired_recalls"] = [0.05,0.10]
     
     
     
@@ -64,10 +64,10 @@ def main(result_dir_master, result_dir_s3):
     
     # user to specify : seed in Random Forest model
     CON_CONFIGS["seed"] = 42
-    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_different_pn_proportion_data/"
-    CON_CONFIGS["pos_file"] = "pos_1.0pct.csv"
-    CON_CONFIGS["neg_file"] = "neg_1.0pct_ratio_5.csv"
-    CON_CONFIGS["ss_file"] = "ss_1.0pct_ratio_10.csv"
+    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    CON_CONFIGS["pos_file"] = "pos_70.0pct.csv"
+    CON_CONFIGS["neg_file"] = "neg_70.0pct.csv"
+    CON_CONFIGS["ss_file"] = "ss_70.0pct.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
@@ -88,10 +88,10 @@ def main(result_dir_master, result_dir_s3):
     matchCol = "matched_positive_id"
     patIDCol = "patid"
     nonFeatureCols = [matchCol, orgOutputCol, patIDCol]
-    orgPredictorCols = ["PATIENT_AGE", "LOOKBACK_DAYS", "LVL3_CHRN_ISCH_HD_FLAG", "LVL3_ABN_CHST_XRAY_FLAG"]
-    org_pos_data = org_pos_data.select(nonFeatureCols + orgPredictorCols)
-    org_neg_data = org_neg_data.select(nonFeatureCols + orgPredictorCols)
-    org_ss_data = org_ss_data.select(nonFeatureCols + orgPredictorCols)
+    # orgPredictorCols = ["PATIENT_AGE", "LOOKBACK_DAYS", "LVL3_CHRN_ISCH_HD_FLAG", "LVL3_ABN_CHST_XRAY_FLAG"]
+    # org_pos_data = org_pos_data.select(nonFeatureCols + orgPredictorCols)
+    # org_neg_data = org_neg_data.select(nonFeatureCols + orgPredictorCols)
+    # org_ss_data = org_ss_data.select(nonFeatureCols + orgPredictorCols)
     # sanity check 
     if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
