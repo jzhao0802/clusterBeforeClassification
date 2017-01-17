@@ -118,14 +118,14 @@ def main(result_dir_master, result_dir_s3):
     CON_CONFIGS["warn_threshold_np_ratio"] = 1
     
     # classification
-    CON_CONFIGS["n_eval_folds"] = 5
-    CON_CONFIGS["n_cv_folds"] = 5  
+    CON_CONFIGS["n_eval_folds"] = 3
+    CON_CONFIGS["n_cv_folds"] = 3  
     
-    CON_CONFIGS["lambdas"] = list(10.0 ** numpy.arange(-2, 2, 1.0))
-    CON_CONFIGS["alphas"] = list(numpy.linspace(0, 1, 3))
+    CON_CONFIGS["lambdas"] = [0.1, 1]
+    CON_CONFIGS["alphas"] = [0]
         
-    CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
-    # CON_CONFIGS["desired_recalls"] = [0.05,0.10]
+    # CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
+    CON_CONFIGS["desired_recalls"] = [0.05,0.10]
     
     
     
@@ -135,10 +135,10 @@ def main(result_dir_master, result_dir_s3):
     
     # user to specify : seed in Random Forest model
     CON_CONFIGS["seed"] = 42
-    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
-    CON_CONFIGS["pos_file"] = "pos_70.0pct.csv"
-    CON_CONFIGS["neg_file"] = "neg_70.0pct.csv"
-    CON_CONFIGS["ss_file"] = "ss_70.0pct.csv"
+    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_different_pn_proportion_data/"
+    CON_CONFIGS["pos_file"] = "pos_1.0pct.csv"
+    CON_CONFIGS["neg_file"] = "neg_1.0pct_ratio_5.csv"
+    CON_CONFIGS["ss_file"] = "ss_1.0pct_ratio_10.csv"
     #reading in the data from S3
     spark = SparkSession.builder.appName(os.path.basename(__file__)).getOrCreate()
     org_pos_data = spark.read.option("header", "true")\
@@ -159,10 +159,10 @@ def main(result_dir_master, result_dir_s3):
     matchCol = "matched_positive_id"
     patIDCol = "patid"
     nonFeatureCols = [matchCol, orgOutputCol, patIDCol]
-    # orgPredictorCols = ["PATIENT_AGE", "LOOKBACK_DAYS", "LVL3_CHRN_ISCH_HD_FLAG", "LVL3_ABN_CHST_XRAY_FLAG"]
-    # org_pos_data = org_pos_data.select(nonFeatureCols + orgPredictorCols)
-    # org_neg_data = org_neg_data.select(nonFeatureCols + orgPredictorCols)
-    # org_ss_data = org_ss_data.select(nonFeatureCols + orgPredictorCols)
+    orgPredictorCols = ["PATIENT_AGE", "LOOKBACK_DAYS", "LVL3_CHRN_ISCH_HD_FLAG", "LVL3_ABN_CHST_XRAY_FLAG"]
+    org_pos_data = org_pos_data.select(nonFeatureCols + orgPredictorCols)
+    org_neg_data = org_neg_data.select(nonFeatureCols + orgPredictorCols)
+    org_ss_data = org_ss_data.select(nonFeatureCols + orgPredictorCols)
     # sanity check 
     if type(org_pos_data.select(orgOutputCol).schema.fields[0].dataType) not in (DoubleType, IntegerType):
         raise TypeError("The output column is not of type integer or double. ")
@@ -185,6 +185,12 @@ def main(result_dir_master, result_dir_s3):
     # user to specify: the column name for prediction
     predictionCol = "probability"
     
+    CON_CONFIGS["orgPredictorCols"] = orgPredictorCols
+    CON_CONFIGS["orgPredictorCols4Clustering"] = orgPredictorCols4Clustering
+    CON_CONFIGS["n_predictors_classification"] = len(orgPredictorCols)
+    CON_CONFIGS["n_rows_pos"] = org_pos_data.count()
+    CON_CONFIGS["n_rows_neg"] = org_neg_data.count()
+    CON_CONFIGS["n_rows_ss"] = org_ss_data.count()
     save_analysis_info(\
         result_dir_master, 
         "analysis_info.txt", 
@@ -232,16 +238,23 @@ def main(result_dir_master, result_dir_s3):
     
     metricSets = [{"metricName": "precisionAtGivenRecall", "metricParams": {"recallValue": x}} for x in CON_CONFIGS["desired_recalls"]]
     
+    filename_loop_info = result_dir_master + "loop_info.txt"
+    file_loop_info = open(filename_loop_info, "w")    
+    
     inputTrivialNegPredCols = ["_pos_prob", "_neg_prob"]
     trivial_neg_pred_assembler = VectorAssembler(inputCols=inputTrivialNegPredCols, outputCol=predictionCol)
     
-
     for iFold in range(CON_CONFIGS["n_eval_folds"]):
         
         
         condition = pos_neg_data_with_eval_ids[evalIDCol] == iFold
         leftoutFold = pos_neg_data_with_eval_ids.filter(condition).drop(evalIDCol)
         trainFolds = pos_neg_data_with_eval_ids.filter(~condition).drop(evalIDCol)
+        
+        file_loop_info.write("####################################################################\n\n".format(iFold))
+        file_loop_info.write("iFold: {}\n\n".format(iFold))
+        file_loop_info.write("n_rows of leftoutFold: {}\n".format(leftoutFold.count()))
+        file_loop_info.write("n_rows of trainFolds: {}\n".format(trainFolds.count()))        
         
         #
         ## clustering to be done here
@@ -258,7 +271,11 @@ def main(result_dir_master, result_dir_s3):
         nPosesAllClusters = clustered_pos.count()
         predictionsOneFold = None
         
+        file_loop_info.write("nPosesAllClusters: {}\n".format(nPosesAllClusters))
+        
         for i_cluster in range(CON_CONFIGS["n_clusters"]):
+        
+            file_loop_info.write("i_cluster: {}\n\n".format(i_cluster))
             
             # the positive data for training the classifier
             train_pos = clustered_pos\
@@ -266,7 +283,9 @@ def main(result_dir_master, result_dir_s3):
                 .select(patIDCol)\
                 .join(trainFolds, patIDCol)
             
+            file_loop_info.write("n_rows of train_pos: {}\n".format(train_pos.count()))
             posPctThisClusterVSAllClusters = float(train_pos.count()) / nPosesAllClusters
+            file_loop_info.write("posPctThisClusterVSAllClusters: {}\n".format(posPctThisClusterVSAllClusters))
             # select negative training data based on the clustering result
             corresponding_neg = train_pos\
                 .select(matchCol)\
@@ -285,6 +304,7 @@ def main(result_dir_master, result_dir_s3):
                 .join(trainFolds, patIDCol)\
                 .select(train_pos.columns)\
                 .union(train_pos)
+            file_loop_info.write("n_rows of train_data: {}\n".format(train_data.count()))
             
             trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, CON_CONFIGS["n_cv_folds"], matchCol, foldCol=cvIDCol)
             trainDataWithCVFoldID.coalesce(int(trainFolds.rdd.getNumPartitions() * posPctThisClusterVSAllClusters) + 1)
@@ -325,6 +345,7 @@ def main(result_dir_master, result_dir_s3):
                 .union(org_neg_data.join(leftoutFold.select(patIDCol), patIDCol).select(org_pos_data.columns))
             entireTestDataAssembled4Clustering = cluster_assembler.transform(entireTestData)\
                     .select([patIDCol, matchCol] + [clusterFeatureCol])
+            file_loop_info.write("n_rows of entireTestData: {}\n".format(entireTestData.count()))
             
             filteredTestData = select_certain_pct_overall_ids_closest_to_cluster_centre(\
                 entireTestDataAssembled4Clustering, 
@@ -334,12 +355,16 @@ def main(result_dir_master, result_dir_s3):
                 patIDCol
             ).join(entireTestData, patIDCol)
             
+            file_loop_info.write("n_rows of filteredTestData: {}\n".format(filteredTestData.count()))
+            
             filteredTestDataAssembled = assembler.transform(filteredTestData)\
                 .select(nonFeatureCols + [collectivePredictorCol])       
             
             # testing
             
-            predictions = cvModel.transform(filteredTestDataAssembled)
+            predictions = cvModel\
+                .transform(filteredTestDataAssembled)\
+                .select(nonFeatureCols + [collectivePredictorCol, predictionCol])
             
             # need to union the test data filtered away (all classified as negative)
             
@@ -411,6 +436,9 @@ def main(result_dir_master, result_dir_s3):
     metricValues = evaluator\
         .evaluateWithSeveralMetrics(predictionsAllData, metricSets = metricSets)
     save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
+    
+    file_loop_info.close()
+    os.chmod(file_loop_info, 0o777)
     
     spark.stop()
 
