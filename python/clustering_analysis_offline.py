@@ -4,6 +4,7 @@ import datetime
 import pandas
 import numpy
 from sklearn.cluster import KMeans
+from sklearn.grid_search import GridSearchCV
 
 
 def read_dataset(path):
@@ -144,6 +145,7 @@ def main(result_dir):
     ##
 
     eval_id_col = "evalFoldID"
+    cv_id_col = "cvFoldID"
     pos_neg_data = pandas.concat([org_pos_data, org_neg_data])
     pos_neg_data_with_eval_ids = append_data_matching_fold_ids(pos_neg_data, CON_CONFIGS["n_eval_folds"], match_col,
                                                                foldCol=eval_id_col)
@@ -194,16 +196,28 @@ def main(result_dir):
                 axis=0
             )
 
-            trainDataWithCVFoldID = AppendDataMatchingFoldIDs(train_data, CON_CONFIGS["n_cv_folds"], matchCol, foldCol=cvIDCol)
-            trainDataWithCVFoldID.coalesce(int(trainFolds.rdd.getNumPartitions() * posPctThisClusterVSAllClusters) + 1)
+            train_data_with_cv_fold_id = append_data_matching_fold_ids(
+                train_data, CON_CONFIGS["n_cv_folds"],
+                match_col,
+                cv_id_col
+            )
 
-            validator = CrossValidatorWithStratificationID(\
-                            estimator=classifier_spec,
-                            estimatorParamMaps=paramGrid,
-                            evaluator=evaluator,
-                            stratifyCol=cvIDCol\
-                        )
-            cvModel = validator.fit(trainDataWithCVFoldID)
+            cv_model = cross_validate_with_stratification_id(
+                estimator=classifier_spec,
+                estimatorParamMaps=param_grid,
+                evaluate_metric="precisionAtGivenRecall",
+                evaluate_metric_params={"recallValue":0.05},
+                stratifyCol=cv_id_col,
+                data=train_data_with_cv_fold_id
+            )
+
+            # validator = CrossValidatorWithStratificationID(\
+            #                 estimator=classifier_spec,
+            #                 estimatorParamMaps=paramGrid,
+            #                 evaluator=evaluator,
+            #                 stratifyCol=cvIDCol\
+            #             )
+            # cvModel = validator.fit(trainDataWithCVFoldID)
 
 
             entireTestData = org_ss_data\
