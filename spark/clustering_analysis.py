@@ -64,7 +64,7 @@ def main(result_dir_master, result_dir_s3):
     
     # user to specify : seed in Random Forest model
     CON_CONFIGS["seed"] = 42
-    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_data/"
+    CON_CONFIGS["data_path"] = "s3://emr-rwes-pa-spark-dev-datastore/lichao.test/data/BI/smaller_different_pn_proportion_data/"
     CON_CONFIGS["pos_file"] = "pos_1.0pct.csv"
     CON_CONFIGS["neg_file"] = "neg_1.0pct_ratio_5.csv"
     CON_CONFIGS["ss_file"] = "ss_1.0pct_ratio_10.csv"
@@ -230,7 +230,7 @@ def main(result_dir_master, result_dir_s3):
     save_metrics(result_dir_master + "metricValuesEntireData.csv", metricValues)
     
     file_loop_info.close()
-    os.chmod(file_loop_info, 0o777)
+    os.chmod(filename_loop_info, 0o777)
     
     spark.stop()
 

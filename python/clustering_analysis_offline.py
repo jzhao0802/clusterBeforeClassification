@@ -5,6 +5,7 @@ import pandas
 import numpy
 from sklearn.cluster import KMeans
 from sklearn.grid_search import GridSearchCV
+from sklearn.linear_model import SGDClassifier
 
 
 def read_dataset(path):
@@ -63,6 +64,11 @@ def select_certain_pct_ids_per_positive_closest_to_cluster_centre(data,
         .loc[:, pat_id_col]
 
     return result
+
+
+def cross_validate_with_stratification_id(estimator, param_grid, evaluate_metric,
+                                          evaluate_metric_params, stratify_col, data):
+
 
 
 def main(result_dir):
@@ -151,6 +157,11 @@ def main(result_dir):
                                                                foldCol=eval_id_col)
 
     #
+    classifier_spec = SGDClassifier(loss="log", penalty="elasticnet")
+    param_grid = {"alpha": CON_CONFIGS["lambdas"],
+                  "l1_ratio": CON_CONFIGS["alphas"]}
+
+    #
     ## loops
 
     for i_eval_fold in range(CON_CONFIGS["n_eval_folds"]):
@@ -202,12 +213,14 @@ def main(result_dir):
                 cv_id_col
             )
 
+            print("Not standardising the data..")
+
             cv_model = cross_validate_with_stratification_id(
                 estimator=classifier_spec,
-                estimatorParamMaps=param_grid,
+                param_grid=param_grid,
                 evaluate_metric="precisionAtGivenRecall",
                 evaluate_metric_params={"recallValue":0.05},
-                stratifyCol=cv_id_col,
+                stratify_col=cv_id_col,
                 data=train_data_with_cv_fold_id
             )
 
