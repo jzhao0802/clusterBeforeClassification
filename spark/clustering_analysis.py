@@ -48,7 +48,7 @@ def main(result_dir_master, result_dir_s3):
     
     # classification
     CON_CONFIGS["n_eval_folds"] = 3
-    CON_CONFIGS["n_cv_folds"] = 53
+    CON_CONFIGS["n_cv_folds"] = 3
     
     CON_CONFIGS["lambdas"] = [0.1, 1]
     CON_CONFIGS["alphas"] = [0]
