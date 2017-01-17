@@ -4,7 +4,9 @@ import datetime
 import pandas
 import numpy
 from sklearn.cluster import KMeans
-from sklearn.grid_search import GridSearchCV
+from sklearn.grid_search import GridSearchCV, ParameterGrid
+from sklearn.linear_model import SGDClassifier
+from sklearn.metrics import precision_recall_curve
 
 
 def read_dataset(path):
@@ -63,6 +65,33 @@ def select_certain_pct_ids_per_positive_closest_to_cluster_centre(data,
         .loc[:, pat_id_col]
 
     return result
+
+
+def cross_validate_with_stratification_id(estimator, param_grid, evaluate_metric, evaluate_metric_params,
+                                          fold_id_col, feature_cols, label_col, data_with_fold_id):
+    param_iterable = ParameterGrid(param_grid)
+    n_folds = data_with_fold_id.loc[:, fold_id_col].unique().shape[0]
+    valid_params = estimator.get_params()
+
+    for i_fold in range(n_folds):
+        condition = data_with_fold_id.loc[:, fold_id_col] == i_fold
+        test_fold = data_with_fold_id.loc[condition, :]
+        train_folds = data_with_fold_id.loc[~condition, :]
+
+        i_param_set = 0
+        for params in param_iterable:
+            # set the parameters
+            for key, value in params.items():
+                if key not in valid_params:
+                    raise ValueError('Invalid parameter {} for estimator {}'.format(key, estimator))
+                setattr(estimator, key, value)
+
+            # train and evaluate the model / params
+            model = estimator.fit(train_folds.loc[:, feature_cols], train_folds[:, label_col])
+            preds = model.predict_prob(test_fold.loc[: feature_cols])
+
+
+            i_param_set += 1
 
 
 def main(result_dir):
@@ -151,6 +180,11 @@ def main(result_dir):
                                                                foldCol=eval_id_col)
 
     #
+    classifier_spec = SGDClassifier(loss="log", penalty="elasticnet")
+    param_grid = {"alpha": CON_CONFIGS["lambdas"],
+                  "l1_ratio": CON_CONFIGS["alphas"]}
+
+    #
     ## loops
 
     for i_eval_fold in range(CON_CONFIGS["n_eval_folds"]):
@@ -202,12 +236,16 @@ def main(result_dir):
                 cv_id_col
             )
 
+            print("Not standardising the data..")
+
             cv_model = cross_validate_with_stratification_id(
                 estimator=classifier_spec,
-                estimatorParamMaps=param_grid,
+                param_grid=param_grid,
                 evaluate_metric="precisionAtGivenRecall",
                 evaluate_metric_params={"recallValue":0.05},
-                stratifyCol=cv_id_col,
+                stratify_col=cv_id_col,
+                feature_cols=org_predictor_cols_classification,
+                label_col=org_output_col,
                 data=train_data_with_cv_fold_id
             )
 
