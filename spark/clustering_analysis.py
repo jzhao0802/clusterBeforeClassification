@@ -53,7 +53,7 @@ def main(result_dir_master, result_dir_s3):
     CON_CONFIGS["lambdas"] = list(10.0 ** numpy.arange(-2, 2, 1.0))
     CON_CONFIGS["alphas"] = list(numpy.linspace(0, 1, 3))
         
-    CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25]
+    CON_CONFIGS["desired_recalls"] = [0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     # CON_CONFIGS["desired_recalls"] = [0.05,0.10]
     
     
@@ -141,7 +141,7 @@ def main(result_dir_master, result_dir_s3):
     
     # the model (pipeline)
     classifier_spec = LogisticRegression(maxIter=1e5, featuresCol = collectivePredictorCol,
-                            labelCol = orgOutputCol, standardization = True)
+                            labelCol = orgOutputCol, standardization = False)
     evaluator = BinaryClassificationEvaluatorWithPrecisionAtRecall(\
         rawPredictionCol=predictionCol,
         labelCol=orgOutputCol,
